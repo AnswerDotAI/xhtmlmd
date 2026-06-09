@@ -1,0 +1,44 @@
+# Kramdown Targeted Imports
+
+These examples are selected or adapted from kramdown's focused testcases for
+attributes, abbreviations, and definition lists. Expected output is this crate's
+XHTML dialect, not kramdown's exact renderer shape.
+
+```````````````````````````````` example
+{:base: #id .one key="val"}
+Some paragraph.
+{: base .two}
+.
+<p id="id" class="one two" key="val">Some paragraph.</p>
+````````````````````````````````
+
+```````````````````````````````` example
+## A header
+{:#myid .cls}
+.
+<h2 id="myid" class="cls">A header</h2>
+````````````````````````````````
+
+```````````````````````````````` example
+This is a `span`{: .hund #dog}{: .katz key='val'}.
+.
+<p>This is a <code class="hund katz" id="dog" key="val">span</code>.</p>
+````````````````````````````````
+
+```````````````````````````````` example
+This is *some TEST* to check.
+
+*[TEST]: This Escapes SVG Text.
+.
+<p>This is <em>some <abbr title="This Escapes SVG Text.">TEST</abbr></em> to check.</p>
+````````````````````````````````
+
+```````````````````````````````` example
+*kram*
+: down
+.
+<dl>
+<dt><em>kram</em></dt>
+<dd>down</dd>
+</dl>
+````````````````````````````````

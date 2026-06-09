@@ -12,6 +12,7 @@ use xhtml_md_parser::{to_xhtml, MathMode, Options};
 const CMARK_GFM_SPEC: &str = include_str!("source/cmark-gfm/spec.txt");
 const CMARK_GFM_EXTENSIONS: &str = include_str!("source/cmark-gfm/extensions.txt");
 const MF_SPEC: &str = include_str!("source/mf.txt");
+const KRAMDOWN_SPEC: &str = include_str!("source/kramdown.txt");
 const FENCE: &str = "````````````````````````````````";
 const MAX_FAILURES_TO_PRINT: usize = 20;
 const CASE_TIMEOUT: Duration = Duration::from_secs(15);
@@ -35,6 +36,7 @@ fn markdown_spec_report() {
         parse_cmark_examples("spec.txt", CMARK_GFM_SPEC),
         parse_cmark_examples("extensions.txt", CMARK_GFM_EXTENSIONS),
         parse_cmark_examples("mf.txt", MF_SPEC),
+        parse_cmark_examples("kramdown.txt", KRAMDOWN_SPEC),
         parse_mdtest_examples(
             "php-markdown-extra.mdtest",
             "tests/source/php-markdown-extra.mdtest",
