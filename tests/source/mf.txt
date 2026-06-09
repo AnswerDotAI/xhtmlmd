@@ -1,0 +1,296 @@
+# Notebook-derived extension checks
+
+These examples come from `meta/mf.ipynb`. Disabled examples document notebook
+behaviors that are not part of this crate's current dialect.
+
+## Basic inline literals
+
+```````````````````````````````` example
+:sm ile:
+.
+<p>:sm ile:</p>
+````````````````````````````````
+
+```````````````````````````````` example
+ .
+.
+<p>.</p>
+````````````````````````````````
+
+```````````````````````````````` example
+:unknown:
+.
+<p>:unknown:</p>
+````````````````````````````````
+
+```````````````````````````````` example
+H~ 2~O
+.
+<p>H~ 2~O</p>
+````````````````````````````````
+
+```````````````````````````````` example
+E=mc^ 2^
+.
+<p>E=mc^ 2^</p>
+````````````````````````````````
+
+## Unsupported notebook inline extensions
+
+Emoji replacement is not currently part of this crate's dialect.
+
+```````````````````````````````` example disabled
+:smile:
+.
+<p>😊</p>
+````````````````````````````````
+
+Notebook subscript uses single tildes, which conflicts with our confirmed
+single-tilde strikethrough behavior.
+
+```````````````````````````````` example disabled
+H~2~O
+.
+<p>H<sub>2</sub>O</p>
+````````````````````````````````
+
+## Superscript and highlight
+
+```````````````````````````````` example
+E=mc^2^
+.
+<p>E=mc<sup>2</sup></p>
+````````````````````````````````
+
+```````````````````````````````` example
+==~~double~~==
+.
+<p><mark><del>double</del></mark></p>
+````````````````````````````````
+
+## Strikethrough
+
+```````````````````````````````` example
+~~no space~~
+.
+<p><del>no space</del></p>
+````````````````````````````````
+
+```````````````````````````````` example
+**~~nested~~**
+.
+<p><strong><del>nested</del></strong></p>
+````````````````````````````````
+
+## Autolinks and code
+
+```````````````````````````````` example
+```
+https://fast.ai
+```
+.
+<pre><code>https://fast.ai
+</code></pre>
+````````````````````````````````
+
+```````````````````````````````` example
+https://fast.ai
+.
+<p><a href="https://fast.ai">https://fast.ai</a></p>
+````````````````````````````````
+
+```````````````````````````````` example
+[link](https://fast.ai)
+.
+<p><a href="https://fast.ai">link</a></p>
+````````````````````````````````
+
+## Footnotes
+
+Undefined footnote references remain literal in this crate.
+
+```````````````````````````````` example disabled
+[^1]
+.
+<p><sup><a href="#fn-1" id="fnref-1">[1]</a></sup></p>
+````````````````````````````````
+
+## Task lists
+
+```````````````````````````````` example
+- [x] done
+- [ ] todo
+- regular
+.
+<ul class="task-list">
+<li><input type="checkbox" disabled="disabled" checked="checked" /> done</li>
+<li><input type="checkbox" disabled="disabled" /> todo</li>
+<li>regular</li>
+</ul>
+````````````````````````````````
+
+## Link attributes
+
+```````````````````````````````` example
+[link](http://example.com){target="_blank"}
+.
+<p><a href="http://example.com" target="_blank">link</a></p>
+````````````````````````````````
+
+```````````````````````````````` example
+[link](http://example.com){#my-id .cls}
+.
+<p><a href="http://example.com" id="my-id" class="cls">link</a></p>
+````````````````````````````````
+
+## Heading attributes
+
+```````````````````````````````` example
+# Heading {#intro}
+.
+<h1 id="intro">Heading</h1>
+````````````````````````````````
+
+```````````````````````````````` example
+## Test {.important}
+.
+<h2 class="important">Test</h2>
+````````````````````````````````
+
+```````````````````````````````` example
+### Multi {.c1 .c2}
+.
+<h3 class="c1 c2">Multi</h3>
+````````````````````````````````
+
+```````````````````````````````` example
+# Full {#id1 .cls data-level="1"}
+.
+<h1 id="id1" class="cls" data-level="1">Full</h1>
+````````````````````````````````
+
+```````````````````````````````` example
+# Plain
+.
+<h1>Plain</h1>
+````````````````````````````````
+
+```````````````````````````````` example
+## Empty {}
+.
+<h2>Empty {}</h2>
+````````````````````````````````
+
+```````````````````````````````` example
+# Order {.first #myid .second key="val"}
+.
+<h1 id="myid" class="first second" key="val">Order</h1>
+````````````````````````````````
+
+```````````````````````````````` example
+# Spaces {data-value="hello world"}
+.
+<h1 data-value="hello world">Spaces</h1>
+````````````````````````````````
+
+## Fenced divs
+
+```````````````````````````````` example
+::: {.callout-note}
+Hello **world**
+:::
+.
+<div class="callout-note">
+<p>Hello <strong>world</strong></p>
+</div>
+````````````````````````````````
+
+```````````````````````````````` example
+::: {#box .a .b}
+Inner
+:::
+.
+<div id="box" class="a b">
+<p>Inner</p>
+</div>
+````````````````````````````````
+
+```````````````````````````````` example
+:::: {.columns}
+::: {.column}
+Left
+:::
+::: {.column}
+Right
+:::
+::::
+.
+<div class="columns">
+<div class="column">
+<p>Left</p>
+</div>
+<div class="column">
+<p>Right</p>
+</div>
+</div>
+````````````````````````````````
+
+## Markdown in HTML
+
+This crate treats `markdown` as a parser control attribute and does not render
+it back out.
+
+```````````````````````````````` example
+<div markdown="1">
+
+**bold** and *italic*
+</div>
+.
+<div>
+<p><strong>bold</strong> and <em>italic</em></p>
+</div>
+````````````````````````````````
+
+```````````````````````````````` example
+`<details>`
+.
+<p><code>&lt;details&gt;</code></p>
+````````````````````````````````
+
+## Mistletoe raw HTML behavior
+
+These notebook tests keep raw HTML containers open until their closing tag
+across blank lines. That differs from CommonMark/GFM raw HTML block rules,
+which this crate follows for raw HTML without `markdown="1"`.
+
+```````````````````````````````` example disabled
+<div>
+
+    indented after blank
+</div>
+.
+<div>
+indented after blank
+</div>
+````````````````````````````````
+
+```````````````````````````````` example disabled
+<div>
+
+**not bold**
+</div>
+.
+<div>
+**not bold**
+</div>
+````````````````````````````````
+
+```````````````````````````````` example disabled
+<svg width="10" height="10">
+    <circle cx="5" cy="5" r="4"/>
+</svg>
+.
+<svg width="10" height="10">
+<circle cx="5" cy="5" r="4"/>
+</svg>
+````````````````````````````````

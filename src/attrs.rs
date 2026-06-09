@@ -1,5 +1,5 @@
 use crate::ast::Attr;
-use html_escape::decode_html_entities;
+use crate::entity::decode_entities;
 use std::collections::HashMap;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -202,7 +202,7 @@ pub fn parse_fence_info(
 }
 
 fn decode_info_token(s: &str) -> String {
-    decode_html_entities(&unescape_punctuation(s)).into_owned()
+    decode_entities(&unescape_punctuation(s))
 }
 
 fn unescape_punctuation(s: &str) -> String {
@@ -233,7 +233,74 @@ pub fn normalize_label(s: &str) -> String {
     s.split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
-        .to_ascii_lowercase()
+        .chars()
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+pub fn scan_link_label(src: &str) -> Option<(String, usize)> {
+    let rest = src.strip_prefix('[')?;
+    let mut label = String::new();
+    let mut escaped = false;
+    let mut len = 0usize;
+    for (off, ch) in rest.char_indices() {
+        if escaped {
+            label.push(ch);
+            escaped = false;
+            len += 1;
+            if len > 999 {
+                return None;
+            }
+            continue;
+        }
+        match ch {
+            '\\' => {
+                label.push(ch);
+                escaped = true;
+                len += 1;
+            }
+            '[' => return None,
+            ']' => return Some((label, off + 2)),
+            _ => {
+                label.push(ch);
+                len += 1;
+            }
+        }
+        if len > 999 {
+            return None;
+        }
+    }
+    None
+}
+
+pub fn valid_link_label(label: &str, allow_empty: bool) -> bool {
+    let mut escaped = false;
+    let mut len = 0usize;
+    let mut has_nonspace = false;
+    for ch in label.chars() {
+        if escaped {
+            escaped = false;
+            has_nonspace |= !ch.is_whitespace();
+            len += 1;
+            continue;
+        }
+        match ch {
+            '\\' => {
+                escaped = true;
+                has_nonspace = true;
+                len += 1;
+            }
+            '[' | ']' => return false,
+            _ => {
+                has_nonspace |= !ch.is_whitespace();
+                len += 1;
+            }
+        }
+        if len > 999 {
+            return false;
+        }
+    }
+    allow_empty || has_nonspace
 }
 
 fn last_attr_open(s: &str) -> Option<usize> {
@@ -268,8 +335,7 @@ fn last_attr_open(s: &str) -> Option<usize> {
 
 fn looks_like_attrs(body: &str) -> bool {
     let b = body.trim();
-    b.is_empty()
-        || b.starts_with('#')
+    b.starts_with('#')
         || b.starts_with('.')
         || b.contains('=')
         || b.split_whitespace()

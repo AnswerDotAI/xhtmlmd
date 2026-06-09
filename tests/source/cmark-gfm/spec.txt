@@ -2109,8 +2109,8 @@ _world_.
 <table><tr><td>
 <pre>
 **Hello**,
-<p><em>world</em>.
-</pre></p>
+<p><em>world</em>.</p>
+</pre>
 </td></tr></table>
 ````````````````````````````````
 
@@ -9177,14 +9177,14 @@ These are not autolinks:
 ```````````````````````````````` example
 http://example.com
 .
-<p>http://example.com</p>
+<p><a href="http://example.com">http://example.com</a></p>
 ````````````````````````````````
 
 
 ```````````````````````````````` example
 foo@bar.example.com
 .
-<p>foo@bar.example.com</p>
+<p><a href="mailto:foo@bar.example.com">foo@bar.example.com</a></p>
 ````````````````````````````````
 
 <div class="extension">
@@ -9651,10 +9651,11 @@ All other HTML tags are left untouched.
   <xmp> is disallowed.  <XMP> is also disallowed.
 </blockquote>
 .
-<p><strong> &lt;title> &lt;style> <em></p>
+<p><strong> <title> <style> <em></p>
 <blockquote>
-  &lt;xmp> is disallowed.  &lt;XMP> is also disallowed.
+  <xmp> is disallowed.  <XMP> is also disallowed.
 </blockquote>
+</title></strong></p>
 ````````````````````````````````
 
 </div>

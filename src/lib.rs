@@ -7,9 +7,11 @@
 pub mod ast;
 mod attrs;
 mod block;
+mod entity;
 mod inline;
 mod line;
 mod render;
+mod tagfilter;
 
 pub use ast::{Align, Attr, Block, DefinitionItem, Document, Footnote, Inline, LinkRef, ListItem};
 pub use render::to_xhtml_document;
@@ -30,11 +32,14 @@ pub struct Extensions {
     pub footnotes: bool,
     pub task_lists: bool,
     pub strikethrough: bool,
+    pub superscript: bool,
+    pub highlight: bool,
     pub autolinks: bool,
     pub fenced_code: bool,
     pub fenced_divs: bool,
     pub bracketed_spans: bool,
     pub raw_html: bool,
+    pub tagfilter: bool,
 }
 
 impl Default for Extensions {
@@ -47,11 +52,14 @@ impl Default for Extensions {
             footnotes: true,
             task_lists: true,
             strikethrough: true,
+            superscript: true,
+            highlight: true,
             autolinks: true,
             fenced_code: true,
             fenced_divs: true,
             bracketed_spans: true,
             raw_html: true,
+            tagfilter: false,
         }
     }
 }

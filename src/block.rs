@@ -1,34 +1,42 @@
-use crate::ast::{
-    Align, Attr, Block, DefinitionItem, Document, Footnote, Inline, LinkRef, ListItem,
-};
+use crate::ast::{Align, Attr, Block, DefinitionItem, Document, Footnote, LinkRef, ListItem};
 use crate::attrs::{
     normalize_label, parse_attr_line, parse_fence_info, parse_html_attrs, strip_trailing_attr,
-    AttrLine,
+    valid_link_label, AttrLine,
 };
+use crate::entity::decode_entities;
 use crate::inline::{parse_inlines, InlineContext};
 use crate::line::Line;
+use crate::tagfilter::{is_tagfiltered_start, tagfilter_html};
 use crate::{MathMode, Options};
-use html_escape::decode_html_entities;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub fn parse_document(src: &str, options: &Options) -> Document {
     let src = src.replace("\r\n", "\n").replace('\r', "\n");
     let lines = src.lines().map(|s| s.to_string()).collect::<Vec<_>>();
-    let link_defs = collect_link_defs(&lines);
     let mut parser = Parser {
         lines,
         i: 0,
         options: options.clone(),
-        link_defs,
+        link_defs: HashMap::new(),
         attr_defs: HashMap::new(),
         footnotes: Vec::new(),
         warnings: Vec::new(),
-        containers: true,
     };
     let blocks = parser.parse_blocks(0);
+    let footnote_defs = parser
+        .footnotes
+        .iter()
+        .map(|f| f.label.clone())
+        .collect::<HashSet<_>>();
+    let ctx = InlineContext {
+        options: &parser.options,
+        attr_defs: &parser.attr_defs,
+        link_defs: &parser.link_defs,
+        footnote_defs: &footnote_defs,
+    };
     Document {
-        blocks,
-        footnotes: parser.footnotes,
+        blocks: finalize_blocks(blocks, &ctx),
+        footnotes: finalize_footnotes(parser.footnotes, &ctx),
         warnings: parser.warnings,
     }
 }
@@ -39,17 +47,235 @@ struct Parser {
     options: Options,
     link_defs: HashMap<String, LinkRef>,
     attr_defs: HashMap<String, Attr>,
-    footnotes: Vec<Footnote>,
+    footnotes: Vec<DraftFootnote>,
     warnings: Vec<String>,
-    containers: bool,
+}
+
+struct DraftFootnote {
+    label: String,
+    blocks: Vec<DraftBlock>,
+}
+
+struct DraftListItem {
+    attrs: Attr,
+    checked: Option<bool>,
+    blocks: Vec<DraftBlock>,
+}
+
+struct DraftDefinitionItem {
+    term: String,
+    definitions: Vec<Vec<DraftBlock>>,
+}
+
+enum DraftBlock {
+    Paragraph {
+        attrs: Attr,
+        text: String,
+    },
+    Heading {
+        level: u8,
+        attrs: Attr,
+        text: String,
+    },
+    BlockQuote {
+        attrs: Attr,
+        children: Vec<DraftBlock>,
+    },
+    List {
+        attrs: Attr,
+        ordered: bool,
+        start: usize,
+        tight: bool,
+        items: Vec<DraftListItem>,
+    },
+    DefinitionList {
+        attrs: Attr,
+        items: Vec<DraftDefinitionItem>,
+    },
+    CodeBlock {
+        attrs: Attr,
+        info: String,
+        lang: Option<String>,
+        text: String,
+    },
+    Html {
+        raw: String,
+    },
+    HtmlContainer {
+        tag: String,
+        attrs: Attr,
+        children: Vec<DraftBlock>,
+    },
+    ThematicBreak {
+        attrs: Attr,
+    },
+    Table {
+        attrs: Attr,
+        aligns: Vec<Align>,
+        head: Vec<String>,
+        rows: Vec<Vec<String>>,
+    },
+    Div {
+        attrs: Attr,
+        children: Vec<DraftBlock>,
+    },
+    Math {
+        attrs: Attr,
+        display: bool,
+        tex: String,
+    },
+}
+
+impl DraftBlock {
+    fn attrs_mut(&mut self) -> Option<&mut Attr> {
+        match self {
+            DraftBlock::Paragraph { attrs, .. }
+            | DraftBlock::Heading { attrs, .. }
+            | DraftBlock::BlockQuote { attrs, .. }
+            | DraftBlock::List { attrs, .. }
+            | DraftBlock::DefinitionList { attrs, .. }
+            | DraftBlock::CodeBlock { attrs, .. }
+            | DraftBlock::HtmlContainer { attrs, .. }
+            | DraftBlock::ThematicBreak { attrs, .. }
+            | DraftBlock::Table { attrs, .. }
+            | DraftBlock::Div { attrs, .. }
+            | DraftBlock::Math { attrs, .. } => Some(attrs),
+            DraftBlock::Html { .. } => None,
+        }
+    }
+}
+
+fn finalize_footnotes(items: Vec<DraftFootnote>, ctx: &InlineContext<'_>) -> Vec<Footnote> {
+    items
+        .into_iter()
+        .map(|item| Footnote {
+            label: item.label,
+            blocks: finalize_blocks(item.blocks, ctx),
+        })
+        .collect()
+}
+
+fn finalize_blocks(blocks: Vec<DraftBlock>, ctx: &InlineContext<'_>) -> Vec<Block> {
+    blocks
+        .into_iter()
+        .map(|block| finalize_block(block, ctx))
+        .collect()
+}
+
+fn finalize_block(block: DraftBlock, ctx: &InlineContext<'_>) -> Block {
+    match block {
+        DraftBlock::Paragraph { attrs, text } => Block::Paragraph {
+            attrs,
+            children: parse_inlines(&text, ctx),
+        },
+        DraftBlock::Heading { level, attrs, text } => Block::Heading {
+            level,
+            attrs,
+            children: parse_inlines(&text, ctx),
+        },
+        DraftBlock::BlockQuote { attrs, children } => Block::BlockQuote {
+            attrs,
+            children: finalize_blocks(children, ctx),
+        },
+        DraftBlock::List {
+            attrs,
+            ordered,
+            start,
+            tight,
+            items,
+        } => Block::List {
+            attrs,
+            ordered,
+            start,
+            tight,
+            items: items
+                .into_iter()
+                .map(|item| ListItem {
+                    attrs: item.attrs,
+                    checked: item.checked,
+                    blocks: finalize_blocks(item.blocks, ctx),
+                })
+                .collect(),
+        },
+        DraftBlock::DefinitionList { attrs, items } => Block::DefinitionList {
+            attrs,
+            items: items
+                .into_iter()
+                .map(|item| DefinitionItem {
+                    term: parse_inlines(&item.term, ctx),
+                    definitions: item
+                        .definitions
+                        .into_iter()
+                        .map(|blocks| finalize_blocks(blocks, ctx))
+                        .collect(),
+                })
+                .collect(),
+        },
+        DraftBlock::CodeBlock {
+            attrs,
+            info,
+            lang,
+            text,
+        } => Block::CodeBlock {
+            attrs,
+            info,
+            lang,
+            text,
+        },
+        DraftBlock::Html { raw } => Block::Html { raw },
+        DraftBlock::HtmlContainer {
+            tag,
+            attrs,
+            children,
+        } => Block::HtmlContainer {
+            tag,
+            attrs,
+            children: finalize_blocks(children, ctx),
+        },
+        DraftBlock::ThematicBreak { attrs } => Block::ThematicBreak { attrs },
+        DraftBlock::Table {
+            attrs,
+            aligns,
+            head,
+            rows,
+        } => Block::Table {
+            attrs,
+            aligns,
+            head: head
+                .into_iter()
+                .map(|cell| parse_inlines(&cell, ctx))
+                .collect(),
+            rows: rows
+                .into_iter()
+                .map(|row| {
+                    row.into_iter()
+                        .map(|cell| parse_inlines(&cell, ctx))
+                        .collect()
+                })
+                .collect(),
+        },
+        DraftBlock::Div { attrs, children } => Block::Div {
+            attrs,
+            children: finalize_blocks(children, ctx),
+        },
+        DraftBlock::Math {
+            attrs,
+            display,
+            tex,
+        } => Block::Math {
+            attrs,
+            display,
+            tex,
+        },
+    }
 }
 
 impl Parser {
-    fn parse_blocks(&mut self, depth: usize) -> Vec<Block> {
+    fn parse_blocks(&mut self, depth: usize) -> Vec<DraftBlock> {
         if depth > self.options.max_block_depth {
-            return vec![Block::Paragraph {
+            return vec![DraftBlock::Paragraph {
                 attrs: Attr::default(),
-                children: vec![Inline::Text(self.lines[self.i..].join("\n"))],
+                text: self.lines[self.i..].join("\n"),
             }];
         }
         let mut blocks = Vec::new();
@@ -70,7 +296,7 @@ impl Parser {
                             self.attr_defs.entry(name).or_default().merge(&attr);
                         }
                         AttrLine::Ial(attr) => {
-                            if let Some(last) = blocks.last_mut().and_then(Block::attrs_mut) {
+                            if let Some(last) = blocks.last_mut().and_then(DraftBlock::attrs_mut) {
                                 last.merge(&attr);
                             } else {
                                 pending.merge(&attr);
@@ -81,603 +307,53 @@ impl Parser {
                     continue;
                 }
             }
-            if let Some((_, _, next)) = parse_link_ref_at(&self.lines, self.i) {
+            if let Some((label, lr, next)) = parse_link_ref_at(&self.lines, self.i) {
+                self.add_link_def(label, lr);
                 self.i = next;
                 continue;
             }
-            if self.options.extensions.footnotes {
-                if let Some((label, first)) = footnote_start(self.line()) {
-                    self.i += 1;
-                    let mut text = first;
-                    while self.i < self.lines.len() {
-                        if self.line().trim().is_empty() {
-                            text.push('\n');
-                            self.i += 1;
-                            continue;
-                        }
-                        if indent(self.line()) >= 4 {
-                            text.push('\n');
-                            text.push_str(&strip_indent(self.line(), 4));
-                            self.i += 1;
-                        } else {
-                            break;
-                        }
-                    }
-                    let blocks = self.parse_nested(&text, depth + 1);
-                    self.footnotes.push(Footnote { label, blocks });
-                    continue;
-                }
-            }
-            let mut block = self.parse_one(depth);
+            let mut parsed = self.parse_one(depth);
             if !pending.is_empty() {
-                if let Some(dst) = block.attrs_mut() {
+                if let Some(dst) = parsed.first_mut().and_then(DraftBlock::attrs_mut) {
                     dst.merge(&pending);
+                    pending = Attr::default();
                 }
-                pending = Attr::default();
             }
-            blocks.push(block);
+            blocks.extend(parsed);
         }
         blocks
     }
 
-    fn parse_one(&mut self, depth: usize) -> Block {
-        if self.options.extensions.fenced_divs {
-            if let Some(block) = self.fenced_div(depth) {
-                return block;
-            }
-        }
-        if self.options.extensions.fenced_code {
-            if let Some(block) = self.fenced_code() {
-                return block;
-            }
-        }
-        if let Some(block) = self.block_math(depth) {
-            return block;
-        }
-        if let Some(block) = self.indented_code() {
-            return block;
-        }
-        if self.options.extensions.html_markdown {
-            if let Some(block) = self.html_markdown_block(depth) {
-                return block;
-            }
-        }
-        if self.options.extensions.raw_html {
-            if let Some(block) = self.raw_html_block() {
-                return block;
-            }
-        }
-        if let Some(block) = self.atx_heading() {
-            return block;
-        }
-        if let Some(block) = self.setext_heading() {
-            return block;
-        }
-        if let Some(block) = self.thematic_break() {
-            return block;
-        }
-        if self.containers {
-            if let Some(block) = self.container_block(depth) {
-                return block;
-            }
-        }
-        if self.options.extensions.tables {
-            if let Some(block) = self.table() {
-                return block;
-            }
-        }
-        if self.options.extensions.definition_lists {
-            if let Some(block) = self.definition_list(depth) {
-                return block;
-            }
-        }
-        self.paragraph()
+    fn add_link_def(&mut self, label: String, link_ref: LinkRef) {
+        self.link_defs
+            .entry(normalize_label(&label))
+            .or_insert(link_ref);
     }
 
-    fn ctx(&self) -> InlineContext<'_> {
-        InlineContext {
-            options: &self.options,
-            attr_defs: &self.attr_defs,
-            link_defs: &self.link_defs,
-        }
+    fn parse_one(&mut self, depth: usize) -> Vec<DraftBlock> {
+        self.container_block(depth)
     }
+
     fn line(&self) -> &str {
         &self.lines[self.i]
     }
 
-    fn parse_nested(&mut self, text: &str, depth: usize) -> Vec<Block> {
-        let lines = text.lines().map(|s| s.to_string()).collect::<Vec<_>>();
-        let mut p = Parser {
-            lines,
-            i: 0,
-            options: self.options.clone(),
-            link_defs: self.link_defs.clone(),
-            attr_defs: self.attr_defs.clone(),
-            footnotes: Vec::new(),
-            warnings: Vec::new(),
-            containers: true,
-        };
-        let blocks = p.parse_blocks(depth);
-        self.footnotes.extend(p.footnotes);
-        self.warnings.extend(p.warnings);
-        blocks
-    }
-
-    fn parse_leaf_lines(&mut self, lines: Vec<String>, depth: usize) -> Vec<Block> {
-        let mut p = Parser {
-            lines,
-            i: 0,
-            options: self.options.clone(),
-            link_defs: self.link_defs.clone(),
-            attr_defs: self.attr_defs.clone(),
-            footnotes: Vec::new(),
-            warnings: Vec::new(),
-            containers: false,
-        };
-        let blocks = p.parse_blocks(depth);
-        self.footnotes.extend(p.footnotes);
-        self.warnings.extend(p.warnings);
-        blocks
-    }
-
-    fn atx_heading(&mut self) -> Option<Block> {
-        let line = self.line();
-        if indent(line) > 3 {
-            return None;
-        }
-        let t = line.trim_start();
-        let n = t.as_bytes().iter().take_while(|b| **b == b'#').count();
-        if !(1..=6).contains(&n) {
-            return None;
-        }
-        if t.len() > n && !t.as_bytes()[n].is_ascii_whitespace() {
-            return None;
-        }
-        let mut body = t[n..].trim().to_string();
-        if let Some(pos) = closing_hashes(&body) {
-            body = body[..pos].trim_end().to_string();
-        }
-        let (body, attrs) = if self.options.extensions.attributes {
-            strip_trailing_attr(&body, &self.attr_defs)
-        } else {
-            (body, Attr::default())
-        };
-        let children = parse_inlines(&body, &self.ctx());
-        self.i += 1;
-        Some(Block::Heading {
-            level: n as u8,
-            attrs,
-            children,
-        })
-    }
-
-    fn setext_heading(&mut self) -> Option<Block> {
-        if !can_start_setext_text(self.line()) {
-            return None;
-        }
-        let mut j = self.i + 1;
-        while j < self.lines.len() {
-            if let Some(level) = setext_underline(&self.lines[j]) {
-                let body = self.lines[self.i..j]
-                    .iter()
-                    .map(|line| line.trim())
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                let (body, attrs) = if self.options.extensions.attributes {
-                    strip_trailing_attr(&body, &self.attr_defs)
-                } else {
-                    (body, Attr::default())
-                };
-                let children = parse_inlines(&body, &self.ctx());
-                self.i = j + 1;
-                return Some(Block::Heading {
-                    level,
-                    attrs,
-                    children,
-                });
-            }
-            if !can_continue_setext_text(&self.lines[j]) {
-                break;
-            }
-            j += 1;
-        }
-        None
-    }
-
-    fn thematic_break(&mut self) -> Option<Block> {
-        if indent(self.line()) > 3 {
-            return None;
-        }
-        let s = self.line().trim().replace(' ', "").replace('\t', "");
-        let mut chars = s.chars();
-        let ch = chars.next()?;
-        if (ch == '-' || ch == '*' || ch == '_') && s.len() >= 3 && chars.all(|c| c == ch) {
-            self.i += 1;
-            Some(Block::ThematicBreak {
-                attrs: Attr::default(),
-            })
-        } else {
-            None
-        }
-    }
-
-    fn fenced_code(&mut self) -> Option<Block> {
-        let (ch, len, fence_indent, info) =
-            fence_start(self.line(), '`').or_else(|| fence_start(self.line(), '~'))?;
-        let info = info.to_string();
-        self.i += 1;
-        let mut text = String::new();
-        while self.i < self.lines.len() {
-            if fence_close(self.line(), ch, len) {
-                self.i += 1;
-                break;
-            }
-            text.push_str(&strip_indent(self.line(), fence_indent));
-            text.push('\n');
-            self.i += 1;
-        }
-        let (info, lang, attrs) = parse_fence_info(&info, &self.attr_defs);
-        Some(Block::CodeBlock {
-            attrs,
-            info,
-            lang,
-            text,
-        })
-    }
-
-    fn fenced_div(&mut self, depth: usize) -> Option<Block> {
-        let line = self.line();
-        if indent(line) > 3 {
-            return None;
-        }
-        let t = line.trim_start();
-        let n = t.as_bytes().iter().take_while(|b| **b == b':').count();
-        if n < 3 {
-            return None;
-        }
-        let rest0 = t[n..].trim();
-        if rest0.is_empty() || rest0.chars().all(|c| c == ':') {
-            return None;
-        }
-        let rest = rest0.trim_end_matches(':').trim();
-        let mut attrs = Attr::default();
-        if rest.starts_with('{') {
-            let (_, _, a) = parse_fence_info(rest, &self.attr_defs);
-            attrs.merge(&a);
-        } else {
-            let class = rest.split_whitespace().next().unwrap_or(rest);
-            attrs.push_class(class.trim_matches(':'));
-            if let Some(brace) = rest.find('{') {
-                let (_, _, a) = parse_fence_info(&rest[brace..], &self.attr_defs);
-                attrs.merge(&a);
-            }
-        }
-        self.i += 1;
-        let mut inner = Vec::new();
-        let mut div_depth = 1usize;
-        while self.i < self.lines.len() {
-            let t = self.line().trim();
-            if t.starts_with(":::") && t.chars().all(|c| c == ':') {
-                div_depth -= 1;
-                self.i += 1;
-                if div_depth == 0 {
-                    break;
-                }
-                inner.push(String::new());
-                continue;
-            }
-            if is_fenced_div_open(self.line()) {
-                div_depth += 1;
-            }
-            inner.push(self.line().to_string());
-            self.i += 1;
-        }
-        let children = self.parse_nested(&inner.join("\n"), depth + 1);
-        Some(Block::Div { attrs, children })
-    }
-
-    fn block_math(&mut self, _depth: usize) -> Option<Block> {
-        if self.options.math == MathMode::Off {
-            return None;
-        }
-        let t = self.line().trim();
-        if t == "\\[" {
-            self.i += 1;
-            let mut tex = String::new();
-            while self.i < self.lines.len() {
-                if self.line().trim() == "\\]" {
-                    self.i += 1;
-                    break;
-                }
-                tex.push_str(self.line());
-                tex.push('\n');
-                self.i += 1;
-            }
-            return Some(Block::Math {
-                attrs: Attr::default(),
-                display: true,
-                tex: tex.trim_end().to_string(),
-            });
-        }
-        if self.options.math == MathMode::Dollars && t == "$$" {
-            self.i += 1;
-            let mut tex = String::new();
-            while self.i < self.lines.len() {
-                if self.line().trim() == "$$" {
-                    self.i += 1;
-                    break;
-                }
-                tex.push_str(self.line());
-                tex.push('\n');
-                self.i += 1;
-            }
-            return Some(Block::Math {
-                attrs: Attr::default(),
-                display: true,
-                tex: tex.trim_end().to_string(),
-            });
-        }
-        None
-    }
-
-    fn html_markdown_block(&mut self, depth: usize) -> Option<Block> {
-        let line = self.line();
-        let open = parse_open_tag(line)?;
-        let Some(markdown) = open.markdown else {
-            return None;
-        };
-        if markdown != "1" && markdown != "block" && markdown != "span" {
-            return None;
-        }
-        let close_tag = format!("</{}>", open.tag);
-        let mut inner = String::new();
-        let after_open = &line[open.end..];
-        if let Some(pos) = after_open.to_ascii_lowercase().find(&close_tag) {
-            inner.push_str(&after_open[..pos]);
-            self.i += 1;
-        } else {
-            if !after_open.trim().is_empty() {
-                inner.push_str(after_open);
-                inner.push('\n');
-            }
-            self.i += 1;
-            while self.i < self.lines.len() {
-                let lower = self.line().to_ascii_lowercase();
-                if let Some(pos) = lower.find(&close_tag) {
-                    inner.push_str(&self.line()[..pos]);
-                    self.i += 1;
-                    break;
-                }
-                inner.push_str(self.line());
-                inner.push('\n');
-                self.i += 1;
-            }
-        }
-        let children = if markdown == "span" {
-            vec![Block::Paragraph {
-                attrs: Attr::default(),
-                children: parse_inlines(inner.trim(), &self.ctx()),
-            }]
-        } else {
-            self.parse_nested(&inner, depth + 1)
-        };
-        Some(Block::HtmlContainer {
-            tag: open.tag,
-            attrs: open.attrs,
-            children,
-        })
-    }
-
-    fn raw_html_block(&mut self) -> Option<Block> {
-        let t = self.line().trim_start();
-        let end = html_block_end(t)?;
-        let mut raw = String::new();
-        match end {
-            HtmlBlockEnd::BlankLine => {
-                while self.i < self.lines.len() && !self.line().trim().is_empty() {
-                    raw.push_str(self.line());
-                    raw.push('\n');
-                    self.i += 1;
-                }
-            }
-            HtmlBlockEnd::Contains(pat) => {
-                while self.i < self.lines.len() {
-                    let lower = self.line().to_ascii_lowercase();
-                    raw.push_str(self.line());
-                    raw.push('\n');
-                    self.i += 1;
-                    if lower.contains(&pat) {
-                        break;
-                    }
-                }
-            }
-        }
-        Some(Block::Html { raw })
-    }
-
-    fn container_block(&mut self, depth: usize) -> Option<Block> {
-        if !is_quote_line(self.line()) && list_marker(self.line()).is_none() {
-            return None;
-        }
+    fn container_block(&mut self, depth: usize) -> Vec<DraftBlock> {
         let attr_defs = self.attr_defs.clone();
         let options = self.options.clone();
         let mut builder = ContainerBuilder::new(&attr_defs, &options);
         while self.i < self.lines.len() {
             let line = self.line();
-            if !builder.feed_line(line) {
+            let next_nonblank = self.lines[self.i + 1..]
+                .iter()
+                .find(|line| !line.trim().is_empty())
+                .map(String::as_str);
+            if !builder.feed_line(line, next_nonblank) {
                 break;
             }
             self.i += 1;
         }
-        let mut blocks = builder.finish(self, depth + 1);
-        (!blocks.is_empty()).then(|| blocks.remove(0))
-    }
-
-    fn definition_list(&mut self, depth: usize) -> Option<Block> {
-        if self.i + 1 >= self.lines.len() {
-            return None;
-        }
-        let term_line = self.line().trim().to_string();
-        if term_line.is_empty() || starts_block(&term_line) {
-            return None;
-        }
-        let mut j = self.i + 1;
-        if self.lines[j].trim().is_empty() {
-            j += 1;
-        }
-        if j >= self.lines.len() || def_marker(&self.lines[j]).is_none() {
-            return None;
-        }
-        self.i = j;
-        let mut defs = Vec::new();
-        while self.i < self.lines.len() {
-            let Some(first) = def_marker(self.line()) else {
-                break;
-            };
-            self.i += 1;
-            let mut text = first;
-            while self.i < self.lines.len() {
-                if def_marker(self.line()).is_some() {
-                    break;
-                }
-                if self.line().trim().is_empty() {
-                    text.push('\n');
-                    self.i += 1;
-                    if self.i < self.lines.len() && def_marker(self.line()).is_some() {
-                        break;
-                    }
-                    continue;
-                }
-                if indent(self.line()) <= 3
-                    && (starts_block(self.line()) || list_marker(self.line()).is_some())
-                {
-                    break;
-                }
-                text.push('\n');
-                text.push_str(&strip_indent(self.line(), 2));
-                self.i += 1;
-            }
-            defs.push(self.parse_nested(&text, depth + 1));
-        }
-        let term = parse_inlines(&term_line, &self.ctx());
-        Some(Block::DefinitionList {
-            attrs: Attr::default(),
-            items: vec![DefinitionItem {
-                term,
-                definitions: defs,
-            }],
-        })
-    }
-
-    fn table(&mut self) -> Option<Block> {
-        if self.i + 1 >= self.lines.len() {
-            return None;
-        }
-        let header = split_table_row(self.line())?;
-        let aligns = parse_table_separator(&self.lines[self.i + 1])?;
-        if header.len() != aligns.len() {
-            return None;
-        }
-        self.i += 2;
-        let head = header
-            .into_iter()
-            .map(|c| parse_inlines(c.trim(), &self.ctx()))
-            .collect::<Vec<_>>();
-        let mut rows = Vec::new();
-        while self.i < self.lines.len() {
-            if self.line().trim().is_empty() {
-                break;
-            }
-            if starts_block(self.line()) && !self.line().contains('|') {
-                break;
-            }
-            let Some(mut row) = split_table_row(self.line()) else {
-                break;
-            };
-            row.resize(aligns.len(), String::new());
-            rows.push(
-                row.into_iter()
-                    .take(aligns.len())
-                    .map(|c| parse_inlines(c.trim(), &self.ctx()))
-                    .collect(),
-            );
-            self.i += 1;
-        }
-        Some(Block::Table {
-            attrs: Attr::default(),
-            aligns,
-            head,
-            rows,
-        })
-    }
-
-    fn indented_code(&mut self) -> Option<Block> {
-        if indent(self.line()) < 4 {
-            return None;
-        }
-        let mut text = String::new();
-        while self.i < self.lines.len() {
-            if self.line().trim().is_empty() {
-                let mut next_i = self.i + 1;
-                while next_i < self.lines.len() && self.lines[next_i].trim().is_empty() {
-                    next_i += 1;
-                }
-                if next_i >= self.lines.len() || indent(&self.lines[next_i]) < 4 {
-                    break;
-                }
-                text.push_str(&strip_indent(self.line(), 4));
-                text.push('\n');
-                self.i += 1;
-                continue;
-            }
-            if indent(self.line()) < 4 {
-                break;
-            }
-            text.push_str(&strip_indent(self.line(), 4));
-            text.push('\n');
-            self.i += 1;
-        }
-        Some(Block::CodeBlock {
-            attrs: Attr::default(),
-            info: String::new(),
-            lang: None,
-            text,
-        })
-    }
-
-    fn paragraph(&mut self) -> Block {
-        let mut lines = Vec::new();
-        while self.i < self.lines.len() {
-            if self.line().trim().is_empty() {
-                break;
-            }
-            if !lines.is_empty() && paragraph_interrupts(self.line()) {
-                break;
-            }
-            if self.options.extensions.attributes
-                && parse_attr_line(self.line(), &self.attr_defs).is_some()
-            {
-                break;
-            }
-            if lines.is_empty()
-                && (parse_link_ref_at(&self.lines, self.i).is_some()
-                    || footnote_start(self.line()).is_some())
-            {
-                break;
-            }
-            lines.push(self.line().trim_start().to_string());
-            self.i += 1;
-        }
-        let joined = lines.join("\n").trim_end().to_string();
-        let (text, attrs) = if self.options.extensions.attributes {
-            strip_trailing_attr(&joined, &self.attr_defs)
-        } else {
-            (joined, Attr::default())
-        };
-        Block::Paragraph {
-            attrs,
-            children: parse_inlines(&text, &self.ctx()),
-        }
+        builder.finish(self, depth + 1)
     }
 }
 
@@ -687,6 +363,9 @@ struct ContainerBuilder<'a> {
     attr_defs: &'a HashMap<String, Attr>,
     options: &'a Options,
     can_lazy: bool,
+    leaf_open: bool,
+    consumed_closer: bool,
+    pending_blank_items: Vec<usize>,
 }
 
 struct BuildNode {
@@ -709,10 +388,68 @@ enum BuildKind {
         attrs: Attr,
         checked: Option<bool>,
         content_indent: usize,
-        saw_blank: bool,
         loose: bool,
     },
-    Lines(Vec<String>),
+    Footnote {
+        label: String,
+    },
+    DefinitionList {
+        attrs: Attr,
+    },
+    DefinitionItem {
+        term: String,
+    },
+    DefinitionDefinition,
+    Div {
+        attrs: Attr,
+        fence_len: usize,
+    },
+    HtmlMarkdown {
+        tag: String,
+        attrs: Attr,
+        close_tag: String,
+        span: bool,
+        span_text: String,
+    },
+    FencedCode {
+        ch: char,
+        len: usize,
+        fence_indent: usize,
+        info: String,
+        text: String,
+        closed: bool,
+    },
+    Math {
+        close: &'static str,
+        tex: String,
+        closed: bool,
+    },
+    Paragraph {
+        lines: Vec<String>,
+        setext: bool,
+    },
+    Heading {
+        level: u8,
+        attrs: Attr,
+        text: String,
+    },
+    ThematicBreak {
+        attrs: Attr,
+    },
+    IndentedCode {
+        text: String,
+    },
+    HtmlBlock {
+        end: HtmlBlockEnd,
+        raw: String,
+        closed: bool,
+    },
+    Table {
+        attrs: Attr,
+        aligns: Vec<Align>,
+        head: Vec<String>,
+        rows: Vec<Vec<String>>,
+    },
 }
 
 impl<'a> ContainerBuilder<'a> {
@@ -726,41 +463,78 @@ impl<'a> ContainerBuilder<'a> {
             attr_defs,
             options,
             can_lazy: false,
+            leaf_open: false,
+            consumed_closer: false,
+            pending_blank_items: Vec::new(),
         }
     }
 
-    fn feed_line(&mut self, line: &str) -> bool {
+    fn feed_line(&mut self, line: &str, next_nonblank: Option<&str>) -> bool {
         let mut content = line.to_string();
-        self.match_containers(&mut content);
-        if self.close_finished_list(&content) && self.at_root_after_complete_block() {
+        self.consumed_closer = false;
+        let lazy = self.match_containers(&mut content);
+        if self.consumed_closer {
+            self.can_lazy = false;
+            return true;
+        }
+        if self.feed_open_fenced_code(&content) {
+            self.can_lazy = false;
+            return true;
+        }
+        if self.feed_open_math(&content) {
+            self.can_lazy = false;
+            return true;
+        }
+        if self.feed_open_html_markdown(&content) {
+            self.can_lazy = false;
+            return true;
+        }
+        if self.feed_open_html_block(&content) {
+            self.can_lazy = false;
+            return true;
+        }
+        if self.feed_open_indented_code(&content, next_nonblank) {
+            self.can_lazy = false;
+            return true;
+        }
+        if self.close_finished_list(&content, next_nonblank)
+            && self.at_root_after_complete_block()
+            && !self.leaf_open
+        {
             return false;
         }
-        if self.at_root_after_complete_block() {
+        if self.at_root_after_complete_block() && !self.leaf_open {
             return false;
         }
         if content.trim().is_empty() {
             if self.stack.len() == 1 {
                 return false;
             }
+            if self.current_is_list() || self.current_is_definition_item() {
+                return true;
+            }
             self.mark_blank();
-            self.append_line(String::new());
+            self.leaf_open = false;
             self.can_lazy = false;
             return true;
         }
         if !self.open_starters(&mut content) {
             return false;
         }
-        if self.stack.len() == 1 {
-            return false;
+        if content.trim().is_empty() {
+            self.leaf_open = false;
+            self.can_lazy = false;
+            return true;
         }
         self.mark_content();
-        self.append_line(content.clone());
-        self.can_lazy = is_lazy_paragraph_continuation(&content);
+        let can_lazy = self.append_leaf(content.clone(), !lazy);
+        self.can_lazy = can_lazy && is_lazy_paragraph_continuation(&content);
         true
     }
 
-    fn match_containers(&mut self, content: &mut String) {
+    fn match_containers(&mut self, content: &mut String) -> bool {
         let mut matched = 1;
+        let mut lazy = false;
         for depth in 1..self.stack.len() {
             let idx = self.stack[depth];
             match &self.nodes[idx].kind {
@@ -770,11 +544,15 @@ impl<'a> ContainerBuilder<'a> {
                         matched = depth + 1;
                     } else if self.can_lazy && can_lazy_container_line(content) {
                         matched = depth + 1;
+                        lazy = true;
                     } else {
                         break;
                     }
                 }
                 BuildKind::List { .. } => matched = depth + 1,
+                BuildKind::DefinitionList { .. } | BuildKind::DefinitionItem { .. } => {
+                    matched = depth + 1
+                }
                 BuildKind::ListItem { content_indent, .. } => {
                     if content.trim().is_empty() {
                         if !self.item_has_content(idx) {
@@ -782,32 +560,91 @@ impl<'a> ContainerBuilder<'a> {
                         }
                         matched = depth + 1;
                         content.clear();
-                        break;
+                        continue;
                     }
                     if indent(content) >= *content_indent {
                         *content = strip_indent(content, *content_indent);
                         matched = depth + 1;
                     } else if self.can_lazy && can_lazy_container_line(content) {
                         matched = depth + 1;
+                        lazy = true;
                     } else {
                         break;
                     }
                 }
-                BuildKind::Root | BuildKind::Lines(_) => break,
+                BuildKind::Footnote { .. } => {
+                    if content.trim().is_empty() {
+                        matched = depth + 1;
+                        content.clear();
+                        continue;
+                    }
+                    if indent(content) >= 4 {
+                        *content = strip_indent(content, 4);
+                        matched = depth + 1;
+                    } else {
+                        break;
+                    }
+                }
+                BuildKind::DefinitionDefinition => {
+                    if content.trim().is_empty() {
+                        matched = depth + 1;
+                        content.clear();
+                        continue;
+                    }
+                    if def_marker(content).is_some() {
+                        break;
+                    }
+                    if indent(content) <= 3
+                        && (starts_block(content) || list_marker(content).is_some())
+                    {
+                        matched = depth.saturating_sub(2);
+                        break;
+                    }
+                    *content = strip_indent(content, 2);
+                    matched = depth + 1;
+                }
+                BuildKind::Div { fence_len, .. } => {
+                    if fenced_div_close(content, *fence_len) {
+                        self.stack.truncate(depth);
+                        self.leaf_open = false;
+                        self.consumed_closer = true;
+                        return false;
+                    }
+                    matched = depth + 1;
+                }
+                BuildKind::HtmlMarkdown { .. } => matched = depth + 1,
+                BuildKind::Root
+                | BuildKind::FencedCode { .. }
+                | BuildKind::Math { .. }
+                | BuildKind::Paragraph { .. }
+                | BuildKind::Heading { .. }
+                | BuildKind::ThematicBreak { .. }
+                | BuildKind::IndentedCode { .. }
+                | BuildKind::HtmlBlock { .. }
+                | BuildKind::Table { .. } => break,
             }
         }
         self.stack.truncate(matched);
+        self.refresh_leaf_open();
+        lazy
     }
 
-    fn close_finished_list(&mut self, content: &str) -> bool {
+    fn close_finished_list(&mut self, content: &str, next_nonblank: Option<&str>) -> bool {
         let Some(idx) = self.stack.last().copied() else {
             return false;
         };
         let BuildKind::List { .. } = self.nodes[idx].kind else {
             return false;
         };
+        if content.trim().is_empty()
+            && next_nonblank.is_some_and(|next| self.next_starts_same_list(idx, next))
+        {
+            self.mark_previous_item_pending(idx);
+            return false;
+        }
         if thematic_line(content) {
             self.stack.pop();
+            self.refresh_leaf_open();
             return true;
         }
         if let Some(marker) = list_marker(content) {
@@ -816,6 +653,7 @@ impl<'a> ContainerBuilder<'a> {
             }
         }
         self.stack.pop();
+        self.refresh_leaf_open();
         true
     }
 
@@ -839,6 +677,9 @@ impl<'a> ContainerBuilder<'a> {
             let Some(marker) = list_marker(content) else {
                 break;
             };
+            if self.leaf_open && !list_interrupts_paragraph(content) {
+                break;
+            }
             let list_idx = if self
                 .stack
                 .last()
@@ -870,6 +711,10 @@ impl<'a> ContainerBuilder<'a> {
 
     fn open_node(&mut self, kind: BuildKind) -> usize {
         let parent = *self.stack.last().unwrap();
+        self.push_child(parent, kind)
+    }
+
+    fn push_child(&mut self, parent: usize, kind: BuildKind) -> usize {
         let idx = self.nodes.len();
         self.nodes.push(BuildNode {
             kind,
@@ -887,7 +732,6 @@ impl<'a> ContainerBuilder<'a> {
                 attrs: Attr::default(),
                 checked: None,
                 content_indent: marker.content_indent,
-                saw_blank: false,
                 loose: false,
             },
             children: Vec::new(),
@@ -900,14 +744,20 @@ impl<'a> ContainerBuilder<'a> {
         let Some(prev) = self.nodes[list_idx].children.last().copied() else {
             return;
         };
-        if let BuildKind::ListItem {
-            saw_blank, loose, ..
-        } = &mut self.nodes[prev].kind
-        {
-            if *saw_blank {
+        if self.pending_blank_items.contains(&prev) {
+            if let BuildKind::ListItem { loose, .. } = &mut self.nodes[prev].kind {
                 *loose = true;
             }
+            self.pending_blank_items.clear();
         }
+    }
+
+    fn mark_previous_item_pending(&mut self, list_idx: usize) {
+        let Some(prev) = self.nodes[list_idx].children.last().copied() else {
+            return;
+        };
+        self.pending_blank_items.clear();
+        self.pending_blank_items.push(prev);
     }
 
     fn prepare_item_head(&mut self, item: usize, content: &mut String) {
@@ -929,41 +779,682 @@ impl<'a> ContainerBuilder<'a> {
         *content = first;
     }
 
-    fn append_line(&mut self, line: String) {
-        let parent = *self.stack.last().unwrap();
-        if let Some(last) = self.nodes[parent].children.last().copied() {
-            if let BuildKind::Lines(lines) = &mut self.nodes[last].kind {
-                lines.push(line);
-                return;
+    fn append_leaf(&mut self, line: String, setext: bool) -> bool {
+        if self.append_table_row(&line) {
+            self.leaf_open = true;
+            return false;
+        }
+        if self.append_definition_marker(&line) {
+            self.leaf_open = true;
+            return false;
+        }
+        if self.convert_paragraph_to_table(&line) {
+            self.leaf_open = true;
+            return false;
+        }
+        if self.convert_paragraph_to_setext(&line) {
+            self.leaf_open = false;
+            return false;
+        }
+        if self.convert_paragraph_to_definition_list(&line) {
+            self.leaf_open = true;
+            return false;
+        }
+        if self.append_paragraph_continuation(line.clone(), setext) {
+            self.leaf_open = true;
+            return true;
+        }
+        if self.open_fenced_code(&line) {
+            self.leaf_open = true;
+            return false;
+        }
+        if self.open_math(&line) {
+            self.leaf_open = true;
+            return false;
+        }
+        if self.open_fenced_div(&line) {
+            self.leaf_open = false;
+            return false;
+        }
+        if self.open_footnote(&line) {
+            self.leaf_open = true;
+            return false;
+        }
+        if self.open_html_markdown(&line) {
+            return false;
+        }
+        if self.open_indented_code(&line) {
+            self.leaf_open = true;
+            return false;
+        }
+        if self.open_html_block(&line) {
+            self.leaf_open = true;
+            return false;
+        }
+        if self.open_atx_heading(&line) {
+            self.leaf_open = false;
+            return false;
+        }
+        if thematic_line(&line) {
+            self.open_node(BuildKind::ThematicBreak {
+                attrs: Attr::default(),
+            });
+            self.leaf_open = false;
+            return false;
+        }
+        self.open_node(BuildKind::Paragraph {
+            lines: vec![line],
+            setext,
+        });
+        self.leaf_open = true;
+        true
+    }
+
+    fn append_paragraph_continuation(&mut self, line: String, setext: bool) -> bool {
+        if !self.leaf_open {
+            return false;
+        }
+        let Some(last) = self.last_child() else {
+            return false;
+        };
+        let BuildKind::Paragraph {
+            lines,
+            setext: leaf_setext,
+        } = &mut self.nodes[last].kind
+        else {
+            return false;
+        };
+        if paragraph_interrupts(&line) {
+            return false;
+        }
+        lines.push(line);
+        *leaf_setext &= setext;
+        true
+    }
+
+    fn convert_paragraph_to_setext(&mut self, line: &str) -> bool {
+        if !self.leaf_open {
+            return false;
+        }
+        let Some(level) = setext_underline(line) else {
+            return false;
+        };
+        let Some(last) = self.last_child() else {
+            return false;
+        };
+        let BuildKind::Paragraph { lines, setext } = &self.nodes[last].kind else {
+            return false;
+        };
+        if !*setext {
+            return false;
+        }
+        let body = lines
+            .iter()
+            .map(|line| line.trim())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let (text, attrs) = if self.options.extensions.attributes {
+            strip_trailing_attr(&body, self.attr_defs)
+        } else {
+            (body, Attr::default())
+        };
+        self.nodes[last].kind = BuildKind::Heading { level, attrs, text };
+        true
+    }
+
+    fn convert_paragraph_to_table(&mut self, line: &str) -> bool {
+        if !self.leaf_open {
+            return false;
+        }
+        if !self.options.extensions.tables {
+            return false;
+        }
+        let Some(last) = self.last_child() else {
+            return false;
+        };
+        let BuildKind::Paragraph { lines, .. } = &self.nodes[last].kind else {
+            return false;
+        };
+        let Some(header_line) = lines.last().cloned() else {
+            return false;
+        };
+        let paragraph_len = lines.len();
+        let Some(header) = split_table_row(&header_line) else {
+            return false;
+        };
+        let Some(aligns) = parse_table_separator(line) else {
+            return false;
+        };
+        if header.len() != aligns.len() {
+            return false;
+        }
+        let head = header
+            .into_iter()
+            .map(|cell| cell.trim().to_string())
+            .collect();
+        let table = BuildKind::Table {
+            attrs: Attr::default(),
+            aligns,
+            head,
+            rows: Vec::new(),
+        };
+        if paragraph_len == 1 {
+            self.nodes[last].kind = table;
+        } else {
+            if let BuildKind::Paragraph { lines, .. } = &mut self.nodes[last].kind {
+                lines.pop();
+            }
+            self.open_node(table);
+        }
+        true
+    }
+
+    fn append_table_row(&mut self, line: &str) -> bool {
+        if !self.leaf_open {
+            return false;
+        }
+        let Some(last) = self.last_child() else {
+            return false;
+        };
+        let BuildKind::Table { aligns, rows, .. } = &mut self.nodes[last].kind else {
+            return false;
+        };
+        if line.trim().is_empty() || (starts_block(line) && !line.contains('|')) {
+            return false;
+        }
+        let mut row = split_table_body_row(line);
+        row.resize(aligns.len(), String::new());
+        rows.push(
+            row.into_iter()
+                .take(aligns.len())
+                .map(|cell| cell.trim().to_string())
+                .collect(),
+        );
+        true
+    }
+
+    fn append_definition_marker(&mut self, line: &str) -> bool {
+        let Some(first) = def_marker(line) else {
+            return false;
+        };
+        let Some(item) = self.current_definition_item() else {
+            return false;
+        };
+        self.truncate_to_stack_node(item);
+        let def = self.push_child(item, BuildKind::DefinitionDefinition);
+        self.stack.push(def);
+        self.leaf_open = false;
+        if !first.is_empty() {
+            self.append_leaf(first, false);
+        }
+        true
+    }
+
+    fn convert_paragraph_to_definition_list(&mut self, line: &str) -> bool {
+        if !self.options.extensions.definition_lists {
+            return false;
+        }
+        let Some(first) = def_marker(line) else {
+            return false;
+        };
+        let Some(last) = self.last_child() else {
+            return false;
+        };
+        let BuildKind::Paragraph { lines, .. } = &self.nodes[last].kind else {
+            return false;
+        };
+        if lines.is_empty() {
+            return false;
+        }
+        let term = lines
+            .iter()
+            .map(|line| line.trim())
+            .collect::<Vec<_>>()
+            .join("\n");
+        self.nodes[last].kind = BuildKind::DefinitionList {
+            attrs: Attr::default(),
+        };
+        self.nodes[last].children.clear();
+        let item = self.push_child(last, BuildKind::DefinitionItem { term });
+        let def = self.push_child(item, BuildKind::DefinitionDefinition);
+        self.stack.push(last);
+        self.stack.push(item);
+        self.stack.push(def);
+        self.leaf_open = false;
+        if !first.is_empty() {
+            self.append_leaf(first, false);
+        }
+        true
+    }
+
+    fn open_footnote(&mut self, line: &str) -> bool {
+        if !self.options.extensions.footnotes {
+            return false;
+        }
+        let Some((label, first)) = footnote_start(line) else {
+            return false;
+        };
+        let idx = self.open_node(BuildKind::Footnote { label });
+        self.stack.push(idx);
+        self.leaf_open = false;
+        if !first.is_empty() {
+            self.append_leaf(first, false);
+        }
+        true
+    }
+
+    fn open_fenced_div(&mut self, line: &str) -> bool {
+        if !self.options.extensions.fenced_divs {
+            return false;
+        }
+        let Some((fence_len, attrs)) = fenced_div_start(line, self.attr_defs) else {
+            return false;
+        };
+        let idx = self.open_node(BuildKind::Div { attrs, fence_len });
+        self.stack.push(idx);
+        true
+    }
+
+    fn open_html_markdown(&mut self, line: &str) -> bool {
+        if !self.options.extensions.html_markdown {
+            return false;
+        }
+        let Some(open) = parse_open_tag(line) else {
+            return false;
+        };
+        let Some(markdown) = open.markdown.clone() else {
+            return false;
+        };
+        if markdown != "1" && markdown != "block" && markdown != "span" {
+            return false;
+        }
+        let close_tag = format!("</{}>", open.tag);
+        let span = markdown == "span";
+        let after_open = line[open.end..].to_string();
+        let idx = self.open_node(BuildKind::HtmlMarkdown {
+            tag: open.tag,
+            attrs: open.attrs,
+            close_tag,
+            span,
+            span_text: String::new(),
+        });
+        self.stack.push(idx);
+        self.feed_html_markdown_inner(idx, &after_open);
+        true
+    }
+
+    fn feed_open_html_markdown(&mut self, line: &str) -> bool {
+        let Some(idx) = self.current_html_markdown() else {
+            return false;
+        };
+        self.feed_html_markdown_inner(idx, line);
+        true
+    }
+
+    fn feed_html_markdown_inner(&mut self, idx: usize, line: &str) {
+        let (close_tag, span) = match &self.nodes[idx].kind {
+            BuildKind::HtmlMarkdown {
+                close_tag, span, ..
+            } => (close_tag.clone(), *span),
+            _ => return,
+        };
+        let lower = line.to_ascii_lowercase();
+        let (inner, closes) = if let Some(pos) = lower.find(&close_tag) {
+            (&line[..pos], true)
+        } else {
+            (line, false)
+        };
+        if span {
+            if let BuildKind::HtmlMarkdown { span_text, .. } = &mut self.nodes[idx].kind {
+                if !span_text.is_empty() && !inner.is_empty() {
+                    span_text.push('\n');
+                }
+                span_text.push_str(inner);
+            }
+        } else if !inner.trim().is_empty() {
+            self.append_leaf(inner.to_string(), true);
+        }
+        if closes {
+            self.truncate_to_stack_node(idx);
+            self.stack.pop();
+            self.leaf_open = false;
+        }
+    }
+
+    fn current_html_markdown(&self) -> Option<usize> {
+        let idx = self.stack.last().copied()?;
+        matches!(self.nodes[idx].kind, BuildKind::HtmlMarkdown { .. }).then_some(idx)
+    }
+
+    fn open_atx_heading(&mut self, line: &str) -> bool {
+        if indent(line) > 3 {
+            return false;
+        }
+        let t = line.trim_start();
+        let n = t.as_bytes().iter().take_while(|b| **b == b'#').count();
+        if !(1..=6).contains(&n) || (t.len() > n && !t.as_bytes()[n].is_ascii_whitespace()) {
+            return false;
+        }
+        let mut body = t[n..].trim().to_string();
+        if let Some(pos) = closing_hashes(&body) {
+            body = body[..pos].trim_end().to_string();
+        }
+        let (text, attrs) = if self.options.extensions.attributes {
+            strip_trailing_attr(&body, self.attr_defs)
+        } else {
+            (body, Attr::default())
+        };
+        self.open_node(BuildKind::Heading {
+            level: n as u8,
+            attrs,
+            text,
+        });
+        true
+    }
+
+    fn open_indented_code(&mut self, line: &str) -> bool {
+        if indent(line) < 4 {
+            return false;
+        }
+        self.open_node(BuildKind::IndentedCode {
+            text: indented_code_line(line),
+        });
+        true
+    }
+
+    fn feed_open_indented_code(&mut self, line: &str, next_nonblank: Option<&str>) -> bool {
+        let Some(idx) = self.open_indented_code_idx() else {
+            return false;
+        };
+        if line.trim().is_empty() {
+            let continues = next_nonblank
+                .and_then(|next| self.content_for_current_stack(next))
+                .is_some_and(|next| indent(&next) >= 4);
+            if continues {
+                if let BuildKind::IndentedCode { text } = &mut self.nodes[idx].kind {
+                    text.push_str(&strip_indent(line, 4));
+                    text.push('\n');
+                }
+                self.leaf_open = true;
+                return true;
+            }
+            return false;
+        }
+        if indent(line) < 4 {
+            return false;
+        }
+        if let BuildKind::IndentedCode { text } = &mut self.nodes[idx].kind {
+            text.push_str(&indented_code_line(line));
+        }
+        self.leaf_open = true;
+        true
+    }
+
+    fn open_indented_code_idx(&self) -> Option<usize> {
+        let idx = self.last_child()?;
+        matches!(self.nodes[idx].kind, BuildKind::IndentedCode { .. }).then_some(idx)
+    }
+
+    fn open_html_block(&mut self, line: &str) -> bool {
+        if !self.options.extensions.raw_html {
+            return false;
+        }
+        let t = line.trim_start();
+        if self.options.extensions.tagfilter && is_tagfiltered_start(t) {
+            return false;
+        }
+        let Some(end) = html_block_end(t) else {
+            return false;
+        };
+        let closed = html_block_closed_on_line(&end, line);
+        let mut raw = String::new();
+        raw.push_str(line);
+        raw.push('\n');
+        self.open_node(BuildKind::HtmlBlock { end, raw, closed });
+        true
+    }
+
+    fn feed_open_html_block(&mut self, line: &str) -> bool {
+        let Some(idx) = self.open_html_block_idx() else {
+            return false;
+        };
+        let should_close = match &self.nodes[idx].kind {
+            BuildKind::HtmlBlock {
+                end: HtmlBlockEnd::BlankLine,
+                ..
+            } if line.trim().is_empty() => {
+                if let BuildKind::HtmlBlock { closed, .. } = &mut self.nodes[idx].kind {
+                    *closed = true;
+                }
+                self.leaf_open = false;
+                return false;
+            }
+            BuildKind::HtmlBlock { end, .. } => html_block_closed_on_line(end, line),
+            _ => false,
+        };
+        if let BuildKind::HtmlBlock { raw, closed, .. } = &mut self.nodes[idx].kind {
+            raw.push_str(line);
+            raw.push('\n');
+            if should_close {
+                *closed = true;
+                self.leaf_open = false;
+            } else {
+                self.leaf_open = true;
             }
         }
-        let idx = self.nodes.len();
-        self.nodes.push(BuildNode {
-            kind: BuildKind::Lines(vec![line]),
-            children: Vec::new(),
+        true
+    }
+
+    fn open_html_block_idx(&self) -> Option<usize> {
+        let idx = self.last_child()?;
+        matches!(
+            self.nodes[idx].kind,
+            BuildKind::HtmlBlock { closed: false, .. }
+        )
+        .then_some(idx)
+    }
+
+    fn content_for_current_stack(&self, line: &str) -> Option<String> {
+        let mut content = line.to_string();
+        for idx in self.stack.iter().skip(1).copied() {
+            match &self.nodes[idx].kind {
+                BuildKind::BlockQuote { .. } => {
+                    if !is_quote_line(&content) {
+                        return None;
+                    }
+                    content = strip_quote_marker(&content);
+                }
+                BuildKind::List { .. } => {}
+                BuildKind::DefinitionList { .. }
+                | BuildKind::DefinitionItem { .. }
+                | BuildKind::Div { .. }
+                | BuildKind::HtmlMarkdown { .. } => {}
+                BuildKind::ListItem { content_indent, .. } => {
+                    if content.trim().is_empty() {
+                        content.clear();
+                    } else if indent(&content) >= *content_indent {
+                        content = strip_indent(&content, *content_indent);
+                    } else {
+                        return None;
+                    }
+                }
+                BuildKind::Footnote { .. } => {
+                    if content.trim().is_empty() {
+                        content.clear();
+                    } else if indent(&content) >= 4 {
+                        content = strip_indent(&content, 4);
+                    } else {
+                        return None;
+                    }
+                }
+                BuildKind::DefinitionDefinition => {
+                    if content.trim().is_empty() {
+                        content.clear();
+                    } else if def_marker(&content).is_some() {
+                        return None;
+                    } else {
+                        content = strip_indent(&content, 2);
+                    }
+                }
+                BuildKind::Root
+                | BuildKind::FencedCode { .. }
+                | BuildKind::Math { .. }
+                | BuildKind::Paragraph { .. }
+                | BuildKind::Heading { .. }
+                | BuildKind::ThematicBreak { .. }
+                | BuildKind::IndentedCode { .. }
+                | BuildKind::HtmlBlock { .. }
+                | BuildKind::Table { .. } => return None,
+            }
+        }
+        Some(content)
+    }
+
+    fn last_child(&self) -> Option<usize> {
+        let parent = *self.stack.last()?;
+        self.nodes[parent].children.last().copied()
+    }
+
+    fn refresh_leaf_open(&mut self) {
+        self.leaf_open = self.leaf_open
+            && self.last_child().is_some_and(|idx| {
+                matches!(
+                    self.nodes[idx].kind,
+                    BuildKind::Paragraph { .. }
+                        | BuildKind::Table { .. }
+                        | BuildKind::IndentedCode { .. }
+                        | BuildKind::HtmlBlock { closed: false, .. }
+                        | BuildKind::FencedCode { closed: false, .. }
+                        | BuildKind::Math { closed: false, .. }
+                )
+            });
+    }
+
+    fn open_fenced_code(&mut self, line: &str) -> bool {
+        if !self.options.extensions.fenced_code {
+            return false;
+        }
+        let Some((ch, len, fence_indent, info)) =
+            fence_start(line, '`').or_else(|| fence_start(line, '~'))
+        else {
+            return false;
+        };
+        self.open_node(BuildKind::FencedCode {
+            ch,
+            len,
+            fence_indent,
+            info: info.to_string(),
+            text: String::new(),
+            closed: false,
         });
-        self.nodes[parent].children.push(idx);
+        true
+    }
+
+    fn feed_open_fenced_code(&mut self, line: &str) -> bool {
+        let Some(idx) = self.open_fenced_code_idx() else {
+            return false;
+        };
+        let BuildKind::FencedCode {
+            ch,
+            len,
+            fence_indent,
+            ..
+        } = self.nodes[idx].kind
+        else {
+            return false;
+        };
+        if fence_close(line, ch, len) {
+            if let BuildKind::FencedCode { closed, .. } = &mut self.nodes[idx].kind {
+                *closed = true;
+            }
+            self.leaf_open = false;
+            return true;
+        }
+        if let BuildKind::FencedCode { text, .. } = &mut self.nodes[idx].kind {
+            text.push_str(&strip_indent(line, fence_indent));
+            text.push('\n');
+        }
+        self.leaf_open = true;
+        true
+    }
+
+    fn open_fenced_code_idx(&self) -> Option<usize> {
+        let parent = *self.stack.last()?;
+        let idx = *self.nodes[parent].children.last()?;
+        matches!(
+            self.nodes[idx].kind,
+            BuildKind::FencedCode { closed: false, .. }
+        )
+        .then_some(idx)
+    }
+
+    fn open_math(&mut self, line: &str) -> bool {
+        if self.options.math == MathMode::Off {
+            return false;
+        }
+        let t = line.trim();
+        let close = if t == "\\[" {
+            "\\]"
+        } else if self.options.math == MathMode::Dollars && t == "$$" {
+            "$$"
+        } else {
+            return false;
+        };
+        self.open_node(BuildKind::Math {
+            close,
+            tex: String::new(),
+            closed: false,
+        });
+        true
+    }
+
+    fn feed_open_math(&mut self, line: &str) -> bool {
+        let Some(idx) = self.open_math_idx() else {
+            return false;
+        };
+        let BuildKind::Math { close, .. } = self.nodes[idx].kind else {
+            return false;
+        };
+        if line.trim() == close {
+            if let BuildKind::Math { closed, .. } = &mut self.nodes[idx].kind {
+                *closed = true;
+            }
+            self.leaf_open = false;
+            return true;
+        }
+        if let BuildKind::Math { tex, .. } = &mut self.nodes[idx].kind {
+            tex.push_str(line);
+            tex.push('\n');
+        }
+        self.leaf_open = true;
+        true
+    }
+
+    fn open_math_idx(&self) -> Option<usize> {
+        let idx = self.last_child()?;
+        matches!(self.nodes[idx].kind, BuildKind::Math { closed: false, .. }).then_some(idx)
     }
 
     fn mark_blank(&mut self) {
-        if let Some(item) = self.current_list_item() {
-            if let BuildKind::ListItem { saw_blank, .. } = &mut self.nodes[item].kind {
-                *saw_blank = true;
+        self.pending_blank_items.clear();
+        for idx in self.stack.iter().rev().copied() {
+            match self.nodes[idx].kind {
+                BuildKind::ListItem { .. } => self.pending_blank_items.push(idx),
+                BuildKind::List { .. } => {}
+                _ => break,
             }
         }
     }
 
     fn mark_content(&mut self) {
         if let Some(item) = self.current_list_item() {
-            if let BuildKind::ListItem {
-                saw_blank, loose, ..
-            } = &mut self.nodes[item].kind
-            {
-                if *saw_blank {
+            if self.pending_blank_items.contains(&item) {
+                if let BuildKind::ListItem { loose, .. } = &mut self.nodes[item].kind {
                     *loose = true;
                 }
             }
         }
+        self.pending_blank_items.clear();
     }
 
     fn current_list_item(&self) -> Option<usize> {
@@ -971,12 +1462,44 @@ impl<'a> ContainerBuilder<'a> {
         matches!(self.nodes[idx].kind, BuildKind::ListItem { .. }).then_some(idx)
     }
 
+    fn current_is_list(&self) -> bool {
+        self.stack
+            .last()
+            .copied()
+            .is_some_and(|idx| matches!(self.nodes[idx].kind, BuildKind::List { .. }))
+    }
+
+    fn current_is_definition_item(&self) -> bool {
+        self.stack
+            .last()
+            .copied()
+            .is_some_and(|idx| matches!(self.nodes[idx].kind, BuildKind::DefinitionItem { .. }))
+    }
+
+    fn current_definition_item(&self) -> Option<usize> {
+        self.stack
+            .iter()
+            .rev()
+            .copied()
+            .find(|idx| matches!(self.nodes[*idx].kind, BuildKind::DefinitionItem { .. }))
+    }
+
+    fn truncate_to_stack_node(&mut self, idx: usize) {
+        if let Some(pos) = self.stack.iter().position(|node| *node == idx) {
+            self.stack.truncate(pos + 1);
+        }
+    }
+
     fn item_has_content(&self, idx: usize) -> bool {
         self.nodes[idx]
             .children
             .iter()
             .any(|child| match &self.nodes[*child].kind {
-                BuildKind::Lines(lines) => lines.iter().any(|line| !line.trim().is_empty()),
+                BuildKind::Paragraph { lines, .. } => {
+                    lines.iter().any(|line| !line.trim().is_empty())
+                }
+                BuildKind::IndentedCode { text } => !text.is_empty(),
+                BuildKind::HtmlBlock { raw, .. } => !raw.is_empty(),
                 _ => true,
             })
     }
@@ -992,6 +1515,56 @@ impl<'a> ContainerBuilder<'a> {
         )
     }
 
+    fn next_starts_same_list(&self, list_idx: usize, next: &str) -> bool {
+        let Some(depth) = self.stack.iter().position(|idx| *idx == list_idx) else {
+            return false;
+        };
+        let mut content = next.to_string();
+        for idx in self.stack.iter().take(depth).skip(1).copied() {
+            match &self.nodes[idx].kind {
+                BuildKind::BlockQuote { .. } => {
+                    if !is_quote_line(&content) {
+                        return false;
+                    }
+                    content = strip_quote_marker(&content);
+                }
+                BuildKind::List { .. } => {}
+                BuildKind::DefinitionList { .. }
+                | BuildKind::DefinitionItem { .. }
+                | BuildKind::Div { .. }
+                | BuildKind::HtmlMarkdown { .. } => {}
+                BuildKind::ListItem { content_indent, .. } => {
+                    if indent(&content) < *content_indent {
+                        return false;
+                    }
+                    content = strip_indent(&content, *content_indent);
+                }
+                BuildKind::Footnote { .. } => {
+                    if indent(&content) < 4 {
+                        return false;
+                    }
+                    content = strip_indent(&content, 4);
+                }
+                BuildKind::DefinitionDefinition => {
+                    if def_marker(&content).is_some() {
+                        return false;
+                    }
+                    content = strip_indent(&content, 2);
+                }
+                BuildKind::Root
+                | BuildKind::FencedCode { .. }
+                | BuildKind::Math { .. }
+                | BuildKind::Paragraph { .. }
+                | BuildKind::Heading { .. }
+                | BuildKind::ThematicBreak { .. }
+                | BuildKind::IndentedCode { .. }
+                | BuildKind::HtmlBlock { .. }
+                | BuildKind::Table { .. } => return false,
+            }
+        }
+        list_marker(&content).is_some_and(|marker| self.list_matches(list_idx, marker))
+    }
+
     fn at_root_after_complete_block(&self) -> bool {
         self.stack.len() == 1 && !self.nodes[0].children.is_empty()
     }
@@ -1000,11 +1573,11 @@ impl<'a> ContainerBuilder<'a> {
         self.stack.len().saturating_sub(1)
     }
 
-    fn finish(&self, parser: &mut Parser, depth: usize) -> Vec<Block> {
+    fn finish(&self, parser: &mut Parser, depth: usize) -> Vec<DraftBlock> {
         self.finish_children(0, parser, depth)
     }
 
-    fn finish_children(&self, idx: usize, parser: &mut Parser, depth: usize) -> Vec<Block> {
+    fn finish_children(&self, idx: usize, parser: &mut Parser, depth: usize) -> Vec<DraftBlock> {
         let mut out = Vec::new();
         for child in &self.nodes[idx].children {
             out.extend(self.finish_node(*child, parser, depth + 1));
@@ -1012,10 +1585,10 @@ impl<'a> ContainerBuilder<'a> {
         out
     }
 
-    fn finish_node(&self, idx: usize, parser: &mut Parser, depth: usize) -> Vec<Block> {
+    fn finish_node(&self, idx: usize, parser: &mut Parser, depth: usize) -> Vec<DraftBlock> {
         match &self.nodes[idx].kind {
             BuildKind::Root => self.finish_children(idx, parser, depth),
-            BuildKind::BlockQuote { attrs } => vec![Block::BlockQuote {
+            BuildKind::BlockQuote { attrs } => vec![DraftBlock::BlockQuote {
                 attrs: attrs.clone(),
                 children: self.finish_children(idx, parser, depth),
             }],
@@ -1033,7 +1606,7 @@ impl<'a> ContainerBuilder<'a> {
                         items.push(item);
                     }
                 }
-                vec![Block::List {
+                vec![DraftBlock::List {
                     attrs: attrs.clone(),
                     ordered: *ordered,
                     start: *start,
@@ -1042,8 +1615,151 @@ impl<'a> ContainerBuilder<'a> {
                 }]
             }
             BuildKind::ListItem { .. } => self.finish_children(idx, parser, depth),
-            BuildKind::Lines(lines) => parser.parse_leaf_lines(lines.clone(), depth),
+            BuildKind::Footnote { label } => {
+                let blocks = self.finish_children(idx, parser, depth);
+                parser.footnotes.push(DraftFootnote {
+                    label: label.clone(),
+                    blocks,
+                });
+                Vec::new()
+            }
+            BuildKind::DefinitionList { attrs } => {
+                let mut items = Vec::new();
+                for child in &self.nodes[idx].children {
+                    if let Some(item) = self.finish_definition_item(*child, parser, depth + 1) {
+                        items.push(item);
+                    }
+                }
+                vec![DraftBlock::DefinitionList {
+                    attrs: attrs.clone(),
+                    items,
+                }]
+            }
+            BuildKind::DefinitionItem { .. } => self.finish_children(idx, parser, depth),
+            BuildKind::DefinitionDefinition => self.finish_children(idx, parser, depth),
+            BuildKind::Div { attrs, .. } => vec![DraftBlock::Div {
+                attrs: attrs.clone(),
+                children: self.finish_children(idx, parser, depth),
+            }],
+            BuildKind::HtmlMarkdown {
+                tag,
+                attrs,
+                span,
+                span_text,
+                ..
+            } => {
+                let children = if *span {
+                    vec![DraftBlock::Paragraph {
+                        attrs: Attr::default(),
+                        text: span_text.trim().to_string(),
+                    }]
+                } else {
+                    self.finish_children(idx, parser, depth)
+                };
+                vec![DraftBlock::HtmlContainer {
+                    tag: tag.clone(),
+                    attrs: attrs.clone(),
+                    children,
+                }]
+            }
+            BuildKind::FencedCode { info, text, .. } => {
+                let (info, lang, attrs) = parse_fence_info(info, &parser.attr_defs);
+                vec![DraftBlock::CodeBlock {
+                    attrs,
+                    info,
+                    lang,
+                    text: text.clone(),
+                }]
+            }
+            BuildKind::Math { tex, .. } => vec![DraftBlock::Math {
+                attrs: Attr::default(),
+                display: true,
+                tex: tex.trim_end().to_string(),
+            }],
+            BuildKind::Paragraph { lines, .. } => self.finish_paragraph(lines, parser),
+            BuildKind::Heading { level, attrs, text } => vec![DraftBlock::Heading {
+                level: *level,
+                attrs: attrs.clone(),
+                text: text.clone(),
+            }],
+            BuildKind::ThematicBreak { attrs } => vec![DraftBlock::ThematicBreak {
+                attrs: attrs.clone(),
+            }],
+            BuildKind::IndentedCode { text } => vec![DraftBlock::CodeBlock {
+                attrs: Attr::default(),
+                info: String::new(),
+                lang: None,
+                text: text.clone(),
+            }],
+            BuildKind::HtmlBlock { raw, .. } => vec![DraftBlock::Html {
+                raw: if parser.options.extensions.tagfilter {
+                    tagfilter_html(raw)
+                } else {
+                    raw.clone()
+                },
+            }],
+            BuildKind::Table {
+                attrs,
+                aligns,
+                head,
+                rows,
+            } => vec![DraftBlock::Table {
+                attrs: attrs.clone(),
+                aligns: aligns.clone(),
+                head: head.clone(),
+                rows: rows.clone(),
+            }],
         }
+    }
+
+    fn finish_definition_item(
+        &self,
+        idx: usize,
+        parser: &mut Parser,
+        depth: usize,
+    ) -> Option<DraftDefinitionItem> {
+        let BuildKind::DefinitionItem { term } = &self.nodes[idx].kind else {
+            return None;
+        };
+        let mut definitions = Vec::new();
+        for child in &self.nodes[idx].children {
+            if matches!(self.nodes[*child].kind, BuildKind::DefinitionDefinition) {
+                definitions.push(self.finish_children(*child, parser, depth + 1));
+            }
+        }
+        Some(DraftDefinitionItem {
+            term: term.clone(),
+            definitions,
+        })
+    }
+
+    fn finish_paragraph(&self, lines: &[String], parser: &mut Parser) -> Vec<DraftBlock> {
+        let mut i = 0;
+        while i < lines.len() {
+            if let Some((label, link_ref, next)) = parse_link_ref_at(lines, i) {
+                parser.add_link_def(label, link_ref);
+                i = next;
+                continue;
+            }
+            break;
+        }
+        if i >= lines.len() {
+            return Vec::new();
+        }
+        let joined = lines[i..]
+            .iter()
+            .map(|line| line.trim_start())
+            .collect::<Vec<_>>()
+            .join("\n")
+            .trim_end()
+            .to_string();
+        let (text, attrs) =
+            if parser.options.extensions.attributes && has_block_trailing_attr(&joined) {
+                strip_trailing_attr(&joined, &parser.attr_defs)
+            } else {
+                (joined, Attr::default())
+            };
+        vec![DraftBlock::Paragraph { attrs, text }]
     }
 
     fn finish_list_item(
@@ -1051,7 +1767,7 @@ impl<'a> ContainerBuilder<'a> {
         idx: usize,
         parser: &mut Parser,
         depth: usize,
-    ) -> Option<(ListItem, bool)> {
+    ) -> Option<(DraftListItem, bool)> {
         let BuildKind::ListItem {
             attrs,
             checked,
@@ -1062,7 +1778,7 @@ impl<'a> ContainerBuilder<'a> {
             return None;
         };
         Some((
-            ListItem {
+            DraftListItem {
                 attrs: attrs.clone(),
                 checked: *checked,
                 blocks: self.finish_children(idx, parser, depth),
@@ -1077,56 +1793,6 @@ fn can_lazy_container_line(line: &str) -> bool {
         && !starts_block(line)
         && list_marker(line).is_none()
         && def_marker(line).is_none()
-}
-
-fn collect_link_defs(lines: &[String]) -> HashMap<String, LinkRef> {
-    let scan_lines = lines
-        .iter()
-        .map(|line| strip_all_quote_markers(line))
-        .collect::<Vec<_>>();
-    let mut out = HashMap::new();
-    let mut i = 0;
-    let mut at_block_start = true;
-    while i < scan_lines.len() {
-        if scan_lines[i].trim().is_empty() {
-            at_block_start = true;
-            i += 1;
-            continue;
-        }
-        if let Some((ch, len, _, _)) =
-            fence_start(&scan_lines[i], '`').or_else(|| fence_start(&scan_lines[i], '~'))
-        {
-            i += 1;
-            while i < scan_lines.len() {
-                if fence_close(&scan_lines[i], ch, len) {
-                    i += 1;
-                    break;
-                }
-                i += 1;
-            }
-            at_block_start = true;
-            continue;
-        }
-        if at_block_start {
-            if let Some((label, lr, next)) = parse_link_ref_at(&scan_lines, i) {
-                out.entry(normalize_label(&label)).or_insert(lr);
-                i = next;
-                at_block_start = true;
-                continue;
-            }
-        }
-        if !at_block_start {
-            i += 1;
-        } else if let Some((label, lr, next)) = parse_link_ref_at(&scan_lines, i) {
-            out.entry(normalize_label(&label)).or_insert(lr);
-            i = next;
-            at_block_start = true;
-        } else {
-            i += 1;
-            at_block_start = false;
-        }
-    }
-    out
 }
 
 fn strip_all_quote_markers(line: &str) -> String {
@@ -1168,13 +1834,10 @@ fn parse_link_ref_at(lines: &[String], i: usize) -> Option<(String, LinkRef, usi
     if !t.starts_with('[') || t.starts_with("[^") {
         return None;
     }
-    let close = t.find("]:")?;
-    let label = t[1..close].to_string();
+    let (label, mut rest, mut next) = scan_link_ref_label(lines, i)?;
     if label.trim().is_empty() {
         return None;
     }
-    let mut rest = t[close + 2..].trim_start().to_string();
-    let mut next = i + 1;
     while rest.is_empty() && next < lines.len() {
         if lines[next].trim().is_empty() {
             return None;
@@ -1216,6 +1879,50 @@ fn parse_link_ref_at(lines: &[String], i: usize) -> Option<(String, LinkRef, usi
         }
     }
     Some((label, LinkRef { url, title }, next))
+}
+
+fn scan_link_ref_label(lines: &[String], i: usize) -> Option<(String, String, usize)> {
+    let mut line = lines.get(i)?.trim_start();
+    let mut label = String::new();
+    line = line.strip_prefix('[')?;
+    let mut next = i + 1;
+    loop {
+        let mut escaped = false;
+        for (off, ch) in line.char_indices() {
+            if escaped {
+                label.push(ch);
+                escaped = false;
+                if !valid_link_label(&label, true) {
+                    return None;
+                }
+                continue;
+            }
+            match ch {
+                '\\' => {
+                    label.push(ch);
+                    escaped = true;
+                }
+                '[' => return None,
+                ']' => {
+                    let rest = line[off + 1..].strip_prefix(':')?;
+                    if !valid_link_label(&label, false) {
+                        return None;
+                    }
+                    return Some((label, rest.trim_start().to_string(), next));
+                }
+                _ => label.push(ch),
+            }
+            if !valid_link_label(&label, true) {
+                return None;
+            }
+        }
+        if next >= lines.len() || lines[next].trim().is_empty() {
+            return None;
+        }
+        label.push('\n');
+        line = lines[next].trim_start();
+        next += 1;
+    }
 }
 
 fn scan_link_ref_destination(s: &str) -> Option<(String, usize)> {
@@ -1366,6 +2073,20 @@ fn scan_link_ref_title(s: &str) -> Option<(String, usize)> {
     None
 }
 
+fn has_block_trailing_attr(s: &str) -> bool {
+    let trimmed = s.trim_end();
+    if !trimmed.ends_with('}') {
+        return false;
+    }
+    let Some(open) = trimmed.rfind('{') else {
+        return false;
+    };
+    trimmed[..open]
+        .chars()
+        .next_back()
+        .is_some_and(char::is_whitespace)
+}
+
 fn unescape_backslash_punctuation(s: &str) -> String {
     let mut out = String::new();
     let mut esc = false;
@@ -1388,10 +2109,6 @@ fn unescape_backslash_punctuation(s: &str) -> String {
         out.push('\\');
     }
     out
-}
-
-fn decode_entities(s: &str) -> String {
-    decode_html_entities(s).into_owned()
 }
 
 fn footnote_start(line: &str) -> Option<(String, String)> {
@@ -1452,13 +2169,41 @@ fn fence_close(line: &str, ch: char, len: usize) -> bool {
     n >= len && t[n..].trim().is_empty()
 }
 
-fn is_fenced_div_open(line: &str) -> bool {
+fn fenced_div_start(line: &str, defs: &HashMap<String, Attr>) -> Option<(usize, Attr)> {
     if indent(line) > 3 {
-        return false;
+        return None;
     }
     let t = line.trim_start();
     let n = t.as_bytes().iter().take_while(|b| **b == b':').count();
-    n >= 3 && !t[n..].trim().is_empty() && !t[n..].trim().chars().all(|c| c == ':')
+    if n < 3 {
+        return None;
+    }
+    let rest0 = t[n..].trim();
+    if rest0.is_empty() || rest0.chars().all(|c| c == ':') {
+        return None;
+    }
+    let rest = rest0.trim_end_matches(':').trim();
+    let mut attrs = Attr::default();
+    if rest.starts_with('{') {
+        let (_, _, a) = parse_fence_info(rest, defs);
+        attrs.merge(&a);
+    } else {
+        let class = rest.split_whitespace().next().unwrap_or(rest);
+        attrs.push_class(class.trim_matches(':'));
+        if let Some(brace) = rest.find('{') {
+            let (_, _, a) = parse_fence_info(&rest[brace..], defs);
+            attrs.merge(&a);
+        }
+    }
+    Some((n, attrs))
+}
+
+fn fenced_div_close(line: &str, fence_len: usize) -> bool {
+    if indent(line) > 3 {
+        return false;
+    }
+    let t = line.trim();
+    t.len() == fence_len && t.chars().all(|c| c == ':')
 }
 
 #[derive(Clone)]
@@ -1472,6 +2217,13 @@ struct OpenTag {
 enum HtmlBlockEnd {
     BlankLine,
     Contains(String),
+}
+
+fn html_block_closed_on_line(end: &HtmlBlockEnd, line: &str) -> bool {
+    match end {
+        HtmlBlockEnd::BlankLine => false,
+        HtmlBlockEnd::Contains(pat) => line.to_ascii_lowercase().contains(pat),
+    }
 }
 
 fn html_block_end(line: &str) -> Option<HtmlBlockEnd> {
@@ -1506,6 +2258,29 @@ fn html_block_end(line: &str) -> Option<HtmlBlockEnd> {
     None
 }
 
+fn html_block_interrupts_paragraph(line: &str) -> bool {
+    if !line.starts_with('<') {
+        return false;
+    }
+    let lower = line.to_ascii_lowercase();
+    if lower.starts_with("<!--")
+        || lower.starts_with("<?")
+        || lower.starts_with("<![cdata[")
+        || line
+            .as_bytes()
+            .get(2)
+            .map(|b| line.starts_with("<!") && b.is_ascii_alphabetic())
+            .unwrap_or(false)
+    {
+        return true;
+    }
+    let Some(tag) = html_tag_name(line) else {
+        return false;
+    };
+    matches!(tag.as_str(), "pre" | "script" | "style" | "textarea")
+        || is_commonmark_block_html_tag(&tag)
+}
+
 fn html_tag_name(line: &str) -> Option<String> {
     let rest = line.strip_prefix("</").or_else(|| line.strip_prefix('<'))?;
     if rest.starts_with('!') || rest.starts_with('?') || rest.starts_with('/') {
@@ -1535,17 +2310,21 @@ fn html_tag_name(line: &str) -> Option<String> {
 fn is_complete_html_tag_line(line: &str) -> bool {
     let t = line.trim();
     if t.starts_with("</") {
-        let Some(tag) = html_tag_name(t) else {
-            return false;
-        };
-        let Some(close) = t.find('>') else {
-            return false;
-        };
-        return !tag.is_empty() && t[close + 1..].trim().is_empty();
+        return valid_closing_tag_line(t);
     }
     parse_open_tag(t)
         .map(|open| t[open.end..].trim().is_empty())
         .unwrap_or(false)
+}
+
+fn valid_closing_tag_line(line: &str) -> bool {
+    let Some(rest) = line.strip_prefix("</") else {
+        return false;
+    };
+    let Some(name_end) = tag_name_end(rest) else {
+        return false;
+    };
+    rest[name_end..].trim_end_matches('>').trim().is_empty() && rest.trim_end().ends_with('>')
 }
 
 fn is_commonmark_block_html_tag(tag: &str) -> bool {
@@ -1622,24 +2401,14 @@ fn parse_open_tag(line: &str) -> Option<OpenTag> {
     if rest.starts_with('/') || rest.starts_with('!') || rest.starts_with('?') {
         return None;
     }
-    let mut name_end = 0;
-    for (i, ch) in rest.char_indices() {
-        if ch.is_ascii_alphanumeric() || ch == '-' {
-            name_end = i + ch.len_utf8();
-        } else {
-            break;
-        }
-    }
-    if name_end == 0 {
-        return None;
-    }
+    let name_end = tag_name_end(rest)?;
     let next = rest[name_end..].chars().next().unwrap_or('>');
     if !(next.is_whitespace() || next == '>' || next == '/') {
         return None;
     }
     let tag = rest[..name_end].to_ascii_lowercase();
-    let close = rest.find('>')?;
-    let raw_attrs = rest[name_end..close].trim().trim_end_matches('/').trim();
+    let close = find_tag_close(rest)?;
+    let raw_attrs = valid_open_tag_attrs(&rest[name_end..close])?;
     let (attrs, markdown) = parse_html_attrs(raw_attrs);
     Some(OpenTag {
         tag,
@@ -1647,6 +2416,122 @@ fn parse_open_tag(line: &str) -> Option<OpenTag> {
         markdown,
         end: start + close + 2,
     })
+}
+
+fn tag_name_end(s: &str) -> Option<usize> {
+    let first = s.chars().next()?;
+    if !first.is_ascii_alphabetic() {
+        return None;
+    }
+    let mut end = first.len_utf8();
+    while end < s.len() {
+        let ch = s[end..].chars().next()?;
+        if ch.is_ascii_alphanumeric() || ch == '-' {
+            end += ch.len_utf8();
+        } else {
+            break;
+        }
+    }
+    Some(end)
+}
+
+fn find_tag_close(s: &str) -> Option<usize> {
+    let mut quote = None;
+    for (i, ch) in s.char_indices() {
+        if let Some(q) = quote {
+            if ch == q {
+                quote = None;
+            }
+            continue;
+        }
+        if ch == '\'' || ch == '"' {
+            quote = Some(ch);
+        } else if ch == '>' {
+            return Some(i);
+        }
+    }
+    None
+}
+
+fn valid_open_tag_attrs(raw: &str) -> Option<&str> {
+    let mut i = 0;
+    let mut attr_end = 0;
+    while i < raw.len() {
+        let before_ws = i;
+        while i < raw.len() {
+            let ch = raw[i..].chars().next()?;
+            if !ch.is_whitespace() {
+                break;
+            }
+            i += ch.len_utf8();
+        }
+        if i >= raw.len() {
+            return Some(raw[..attr_end].trim());
+        }
+        if raw[i..].starts_with('/') {
+            return (i + 1 == raw.len()).then_some(raw[..attr_end].trim());
+        }
+        if i == before_ws {
+            return None;
+        }
+        i = parse_html_attr(raw, i)?;
+        attr_end = i;
+    }
+    Some(raw[..attr_end].trim())
+}
+
+fn parse_html_attr(raw: &str, mut i: usize) -> Option<usize> {
+    let first = raw[i..].chars().next()?;
+    if !(first.is_ascii_alphabetic() || first == '_' || first == ':') {
+        return None;
+    }
+    i += first.len_utf8();
+    while i < raw.len() {
+        let ch = raw[i..].chars().next()?;
+        if ch.is_ascii_alphanumeric() || matches!(ch, '_' | '.' | ':' | '-') {
+            i += ch.len_utf8();
+        } else {
+            break;
+        }
+    }
+    let mut j = i;
+    while j < raw.len() {
+        let ch = raw[j..].chars().next()?;
+        if !ch.is_whitespace() {
+            break;
+        }
+        j += ch.len_utf8();
+    }
+    if !raw[j..].starts_with('=') {
+        return Some(i);
+    }
+    j += 1;
+    while j < raw.len() {
+        let ch = raw[j..].chars().next()?;
+        if !ch.is_whitespace() {
+            break;
+        }
+        j += ch.len_utf8();
+    }
+    parse_html_attr_value(raw, j)
+}
+
+fn parse_html_attr_value(raw: &str, i: usize) -> Option<usize> {
+    let first = raw[i..].chars().next()?;
+    if first == '\'' || first == '"' {
+        let rest = &raw[i + first.len_utf8()..];
+        let close = rest.find(first)?;
+        return Some(i + first.len_utf8() + close + first.len_utf8());
+    }
+    let mut end = i;
+    while end < raw.len() {
+        let ch = raw[end..].chars().next()?;
+        if ch.is_whitespace() || matches!(ch, '"' | '\'' | '=' | '<' | '>' | '`') {
+            break;
+        }
+        end += ch.len_utf8();
+    }
+    (end > i).then_some(end)
 }
 
 fn is_quote_line(line: &str) -> bool {
@@ -1789,18 +2674,34 @@ fn split_table_row(line: &str) -> Option<Vec<String>> {
     if !line.contains('|') {
         return None;
     }
+    Some(split_table_cells(line))
+}
+
+fn split_table_body_row(line: &str) -> Vec<String> {
+    if line.contains('|') {
+        split_table_cells(line)
+    } else {
+        vec![line.trim().to_string()]
+    }
+}
+
+fn split_table_cells(line: &str) -> Vec<String> {
     let mut cells = Vec::new();
     let mut cur = String::new();
     let mut esc = false;
     for ch in line.trim().chars() {
         if esc {
-            cur.push(ch);
+            if ch == '|' {
+                cur.push('|');
+            } else {
+                cur.push('\\');
+                cur.push(ch);
+            }
             esc = false;
             continue;
         }
         if ch == '\\' {
             esc = true;
-            cur.push(ch);
             continue;
         }
         if ch == '|' {
@@ -1810,6 +2711,9 @@ fn split_table_row(line: &str) -> Option<Vec<String>> {
             cur.push(ch);
         }
     }
+    if esc {
+        cur.push('\\');
+    }
     cells.push(cur.trim().to_string());
     if cells.first().map(|s| s.is_empty()).unwrap_or(false) {
         cells.remove(0);
@@ -1817,11 +2721,7 @@ fn split_table_row(line: &str) -> Option<Vec<String>> {
     if cells.last().map(|s| s.is_empty()).unwrap_or(false) {
         cells.pop();
     }
-    if !cells.is_empty() {
-        Some(cells)
-    } else {
-        None
-    }
+    cells
 }
 
 fn parse_table_separator(line: &str) -> Option<Vec<Align>> {
@@ -1869,7 +2769,7 @@ fn starts_block(line: &str) -> bool {
         || t.starts_with("```")
         || t.starts_with("~~~")
         || t.starts_with(":::")
-        || t.starts_with('<')
+        || html_block_interrupts_paragraph(t)
         || thematic_line(line)
 }
 fn thematic_line(line: &str) -> bool {
@@ -1882,22 +2782,6 @@ fn thematic_line(line: &str) -> bool {
         return false;
     };
     (ch == '-' || ch == '*' || ch == '_') && s.len() >= 3 && chars.all(|c| c == ch)
-}
-
-fn can_start_setext_text(line: &str) -> bool {
-    indent(line) <= 3
-        && !line.trim().is_empty()
-        && !starts_block(line)
-        && list_marker(line).is_none()
-        && def_marker(line).is_none()
-}
-
-fn can_continue_setext_text(line: &str) -> bool {
-    indent(line) <= 3
-        && !line.trim().is_empty()
-        && !starts_block(line)
-        && list_marker(line).is_none()
-        && def_marker(line).is_none()
 }
 
 fn setext_underline(line: &str) -> Option<u8> {
@@ -1945,6 +2829,12 @@ fn strip_marker_content(line: &str, marker: Marker) -> String {
 
 fn strip_indent(line: &str, n: usize) -> String {
     Line::new(line).strip_indent(n)
+}
+
+fn indented_code_line(line: &str) -> String {
+    let mut out = strip_indent(line, 4);
+    out.push('\n');
+    out
 }
 
 fn strip_from_column(line: &str, col: usize, n: usize) -> String {

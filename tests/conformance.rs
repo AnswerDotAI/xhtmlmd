@@ -9,16 +9,17 @@ use xhtml_md_parser::{to_xhtml, MathMode, Options};
 
 const CMARK_GFM_SPEC: &str = include_str!("source/cmark-gfm/spec.txt");
 const CMARK_GFM_EXTENSIONS: &str = include_str!("source/cmark-gfm/extensions.txt");
+const MF_SPEC: &str = include_str!("source/mf.txt");
 const FENCE: &str = "````````````````````````````````";
 const MAX_FAILURES_TO_PRINT: usize = 20;
 const CASE_TIMEOUT: Duration = Duration::from_secs(15);
 
 #[test]
-#[ignore = "upstream conformance report; expected to fail until dialect gaps are classified"]
-fn cmark_gfm_conformance_report() {
+fn markdown_spec_report() {
     let mut cases = [
         parse_cmark_examples("spec.txt", CMARK_GFM_SPEC),
         parse_cmark_examples("extensions.txt", CMARK_GFM_EXTENSIONS),
+        parse_cmark_examples("mf.txt", MF_SPEC),
     ]
     .concat();
     if let Ok(section) = env::var("XHTML_MD_CONFORMANCE_SECTION") {
@@ -65,7 +66,7 @@ fn cmark_gfm_conformance_report() {
     }
 
     println!(
-        "cmark-gfm conformance: {} passed, {} failed, {} total",
+        "markdown specs: {} passed, {} failed, {} total",
         cases.len() - failures.len(),
         failures.len(),
         cases.len()
@@ -87,7 +88,7 @@ fn cmark_gfm_conformance_report() {
 
     assert!(
         failures.is_empty(),
-        "{} of {} cmark-gfm examples failed; first {} failures printed",
+        "{} of {} markdown spec examples failed; first {} failures printed",
         failures.len(),
         cases.len(),
         failures.len().min(MAX_FAILURES_TO_PRINT)

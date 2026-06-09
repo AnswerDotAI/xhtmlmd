@@ -13,6 +13,7 @@ struct Renderer<'a> {
     doc: &'a Document,
     footnote_nums: HashMap<String, usize>,
     footnote_order: Vec<String>,
+    footnote_ref_counts: HashMap<String, usize>,
 }
 
 impl<'a> Renderer<'a> {
@@ -21,6 +22,7 @@ impl<'a> Renderer<'a> {
             doc,
             footnote_nums: HashMap::new(),
             footnote_order: Vec::new(),
+            footnote_ref_counts: HashMap::new(),
         }
     }
 
@@ -151,9 +153,13 @@ impl<'a> Renderer<'a> {
         out: &mut String,
     ) {
         let tag = if ordered { "ol" } else { "ul" };
+        let mut list_attrs = attrs.clone();
+        if items.iter().any(|item| item.checked.is_some()) {
+            list_attrs.push_class("task-list");
+        }
         out.push('<');
         out.push_str(tag);
-        attrs_html(attrs, out);
+        attrs_html(&list_attrs, out);
         if ordered && start != 1 {
             out.push_str(" start=\"");
             out.push_str(&start.to_string());
@@ -161,12 +167,8 @@ impl<'a> Renderer<'a> {
         }
         out.push_str(">\n");
         for item in items {
-            let mut li_attrs = item.attrs.clone();
-            if item.checked.is_some() {
-                li_attrs.push_class("task-list-item");
-            }
             out.push_str("<li");
-            attrs_html(&li_attrs, out);
+            attrs_html(&item.attrs, out);
             out.push('>');
             if let Some(checked) = item.checked {
                 out.push_str("<input type=\"checkbox\" disabled=\"disabled\"");
@@ -264,6 +266,20 @@ impl<'a> Renderer<'a> {
                 self.inlines(children, out);
                 out.push_str("</del>");
             }
+            Inline::Superscript { attrs, text } => {
+                out.push_str("<sup");
+                attrs_html(attrs, out);
+                out.push('>');
+                escape_text(text, out);
+                out.push_str("</sup>");
+            }
+            Inline::Highlight { attrs, children } => {
+                out.push_str("<mark");
+                attrs_html(attrs, out);
+                out.push('>');
+                self.inlines(children, out);
+                out.push_str("</mark>");
+            }
             Inline::Code { attrs, text } => {
                 out.push_str("<code");
                 attrs_html(attrs, out);
@@ -351,10 +367,17 @@ impl<'a> Renderer<'a> {
             self.footnote_nums.insert(label.to_string(), n);
             n
         };
-        out.push_str("<sup id=\"fnref-");
-        escape_attr(label, out);
-        out.push_str("\"><a href=\"#fn-");
-        escape_attr(label, out);
+        let count = self
+            .footnote_ref_counts
+            .entry(label.to_string())
+            .or_default();
+        *count += 1;
+        let ref_id = footnote_ref_id(label, *count);
+        let note_id = footnote_id(label);
+        out.push_str("<sup id=\"");
+        escape_attr(&ref_id, out);
+        out.push_str("\"><a href=\"#");
+        escape_attr(&note_id, out);
         out.push_str("\" class=\"footnote-ref\" role=\"doc-noteref\">");
         out.push_str(&n.to_string());
         out.push_str("</a></sup>");
@@ -372,18 +395,61 @@ impl<'a> Renderer<'a> {
             .collect();
         out.push_str("<section class=\"footnotes\" role=\"doc-endnotes\">\n<hr />\n<ol>\n");
         for label in self.footnote_order.clone() {
-            out.push_str("<li id=\"fn-");
-            escape_attr(&label, out);
+            let note_id = footnote_id(&label);
+            out.push_str("<li id=\"");
+            escape_attr(&note_id, out);
             out.push_str("\">\n");
             if let Some(def) = defs.get(label.as_str()) {
                 self.blocks(&def.blocks, out);
             }
-            out.push_str("<a href=\"#fnref-");
-            escape_attr(&label, out);
-            out.push_str("\" class=\"footnote-backref\" role=\"doc-backlink\">↩</a>\n</li>\n");
+            let refs = self.footnote_ref_counts.get(&label).copied().unwrap_or(1);
+            for idx in 1..=refs {
+                if idx > 1 {
+                    out.push(' ');
+                }
+                let ref_id = footnote_ref_id(&label, idx);
+                out.push_str("<a href=\"#");
+                escape_attr(&ref_id, out);
+                out.push_str("\" class=\"footnote-backref\" role=\"doc-backlink\">↩");
+                if idx > 1 {
+                    out.push_str("<sup>");
+                    out.push_str(&idx.to_string());
+                    out.push_str("</sup>");
+                }
+                out.push_str("</a>");
+            }
+            out.push_str("\n</li>\n");
         }
         out.push_str("</ol>\n</section>\n");
     }
+}
+
+fn footnote_ref_id(label: &str, idx: usize) -> String {
+    let label = escape_fragment(label);
+    if idx == 1 {
+        format!("fnref-{label}")
+    } else {
+        format!("fnref-{label}-{idx}")
+    }
+}
+
+fn footnote_id(label: &str) -> String {
+    format!("fn-{}", escape_fragment(label))
+}
+
+fn escape_fragment(s: &str) -> String {
+    let mut out = String::new();
+    for ch in s.chars() {
+        match ch {
+            ch if ch.is_ascii_alphanumeric()
+                || matches!(ch, '-' | '.' | '_' | '~' | '/' | '(' | ')') =>
+            {
+                out.push(ch);
+            }
+            _ => percent_encode_char(ch, &mut out),
+        }
+    }
+    out
 }
 
 fn align_attr(a: Align, out: &mut String) {
@@ -426,9 +492,12 @@ fn plain(items: &[Inline]) -> String {
             Inline::Emph { children, .. }
             | Inline::Strong { children, .. }
             | Inline::Strike { children, .. }
+            | Inline::Highlight { children, .. }
             | Inline::Span { children, .. }
             | Inline::Link { children, .. } => out.push_str(&plain(children)),
-            Inline::Code { text, .. } | Inline::Math { tex: text, .. } => out.push_str(text),
+            Inline::Code { text, .. }
+            | Inline::Superscript { text, .. }
+            | Inline::Math { tex: text, .. } => out.push_str(text),
             Inline::Image { alt, .. } => out.push_str(&plain(alt)),
             Inline::Autolink { text, .. } => out.push_str(text),
             Inline::FootnoteRef { label } => out.push_str(label),
@@ -464,18 +533,26 @@ fn escape_url_attr(s: &str, out: &mut String) {
         match ch {
             ' ' => out.push_str("%20"),
             '\\' => out.push_str("%5C"),
+            '"' => out.push_str("%22"),
+            '<' => out.push_str("%3C"),
+            '>' => out.push_str("%3E"),
+            '`' => out.push_str("%60"),
+            '[' => out.push_str("%5B"),
+            ']' => out.push_str("%5D"),
+            ch if ch.is_control() => percent_encode_char(ch, out),
             ch if !ch.is_ascii() => {
-                let mut buf = [0u8; 4];
-                for byte in ch.encode_utf8(&mut buf).as_bytes() {
-                    out.push('%');
-                    out.push_str(&format!("{byte:02X}"));
-                }
+                percent_encode_char(ch, out);
             }
             '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
             _ => out.push(ch),
         }
+    }
+}
+
+fn percent_encode_char(ch: char, out: &mut String) {
+    let mut buf = [0u8; 4];
+    for byte in ch.encode_utf8(&mut buf).as_bytes() {
+        out.push('%');
+        out.push_str(&format!("{byte:02X}"));
     }
 }

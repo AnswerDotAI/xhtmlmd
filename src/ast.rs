@@ -195,6 +195,14 @@ pub enum Inline {
         attrs: Attr,
         children: Vec<Inline>,
     },
+    Superscript {
+        attrs: Attr,
+        text: String,
+    },
+    Highlight {
+        attrs: Attr,
+        children: Vec<Inline>,
+    },
     Code {
         attrs: Attr,
         text: String,
@@ -237,6 +245,8 @@ impl Inline {
             Inline::Emph { attrs, .. }
             | Inline::Strong { attrs, .. }
             | Inline::Strike { attrs, .. }
+            | Inline::Superscript { attrs, .. }
+            | Inline::Highlight { attrs, .. }
             | Inline::Code { attrs, .. }
             | Inline::Link { attrs, .. }
             | Inline::Image { attrs, .. }

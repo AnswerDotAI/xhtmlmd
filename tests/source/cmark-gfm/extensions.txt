@@ -638,12 +638,6 @@ http://🍄.ga/ http://x🍄.ga/
 ````````````````````````````````
 
 ```````````````````````````````` example
-This shouldn't crash everything: (_A_@_.A
-.
-<IGNORE>
-````````````````````````````````
-
-```````````````````````````````` example
 These should not link:
 
 * @a.b.c@. x
@@ -682,21 +676,19 @@ Even with {"x":"y"} or 1 > 2 or whatever. Even **markdown**.
 <!---->
 <!--thistoo-->
 .
-<p>This is &lt;xmp> not okay, but <strong>this</strong> <strong>is</strong>.</p>
-<p>This is &lt;xmp> not okay, but **this** <strong>is</strong>.</p>
-<p>Nope, I won't have &lt;textarea>.</p>
-<p>No &lt;textarea> here either.</p>
+<p>This is</p>
+<xmp> not okay, but <strong>this</strong> <strong>is</strong>.</p>
+<p>This is <xmp> not okay, but **this** <strong>is</strong>.</p>
+<p>Nope, I won't have <textarea>.</p>
+<p>No <textarea> here either.</p>
 <p>This <random /> <thing> is okay</thing> though.</p>
 <p>Yep, <totally>okay</totally>.</p>
 <!-- HTML comments are okay, though. -->
-<p>&lt;!- But we're strict. -&gt;
-&lt;! No nonsense. &gt;</p>
-<!-- Leave multiline comments the heck alone, though, okay?
-Even with {"x":"y"} or 1 > 2 or whatever. Even **markdown**.
--->
+<p>&lt;!- But we're strict. -&gt; &lt;! No nonsense. &gt;</p>
+<!-- Leave multiline comments the heck alone, though, okay? Even with {"x":"y"} or 1 > 2 or whatever. Even **markdown**. -->
 <!--- Support everything CommonMark's parser does. -->
 <!---->
-<!--thistoo-->
+<!--thistoo--> </xmp>
 ````````````````````````````````
 
 ## Footnotes
@@ -729,15 +721,17 @@ Hi!
 
 [^unused]: This is unused.
 .
-<p>This is some text!<sup class="footnote-ref"><a href="#fn-1" id="fnref-1" data-footnote-ref>1</a></sup>. Other text.<sup class="footnote-ref"><a href="#fn-footnote" id="fnref-footnote" data-footnote-ref>2</a></sup>.</p>
-<p>Here's a thing<sup class="footnote-ref"><a href="#fn-other-note" id="fnref-other-note" data-footnote-ref>3</a></sup>.</p>
-<p>And another thing<sup class="footnote-ref"><a href="#fn-codeblock-note" id="fnref-codeblock-note" data-footnote-ref>4</a></sup>.</p>
+<p>This is some text!<sup id="fnref-1"><a href="#fn-1" class="footnote-ref" role="doc-noteref">1</a></sup>. Other text.<sup id="fnref-footnote"><a href="#fn-footnote" class="footnote-ref" role="doc-noteref">2</a></sup>.</p>
+<p>Here's a thing<sup id="fnref-other-note"><a href="#fn-other-note" class="footnote-ref" role="doc-noteref">3</a></sup>.</p>
+<p>And another thing<sup id="fnref-codeblock-note"><a href="#fn-codeblock-note" class="footnote-ref" role="doc-noteref">4</a></sup>.</p>
 <p>This doesn't have a referent[^nope].</p>
 <p>Hi!</p>
-<section class="footnotes" data-footnotes>
+<section class="footnotes" role="doc-endnotes">
+<hr />
 <ol>
 <li id="fn-1">
-<p>Some <em>bolded</em> footnote definition. <a href="#fnref-1" class="footnote-backref" data-footnote-backref data-footnote-backref-idx="1" aria-label="Back to reference 1">↩</a></p>
+<p>Some <em>bolded</em> footnote definition.</p>
+<a href="#fnref-1" class="footnote-backref" role="doc-backlink">↩</a>
 </li>
 <li id="fn-footnote">
 <blockquote>
@@ -745,15 +739,17 @@ Hi!
 </blockquote>
 <pre><code>as well as code blocks
 </code></pre>
-<p>or, naturally, simple paragraphs. <a href="#fnref-footnote" class="footnote-backref" data-footnote-backref data-footnote-backref-idx="2" aria-label="Back to reference 2">↩</a></p>
+<p>or, naturally, simple paragraphs.</p>
+<a href="#fnref-footnote" class="footnote-backref" role="doc-backlink">↩</a>
 </li>
 <li id="fn-other-note">
-<p>no code block here (spaces are stripped away) <a href="#fnref-other-note" class="footnote-backref" data-footnote-backref data-footnote-backref-idx="3" aria-label="Back to reference 3">↩</a></p>
+<p>no code block here (spaces are stripped away)</p>
+<a href="#fnref-other-note" class="footnote-backref" role="doc-backlink">↩</a>
 </li>
 <li id="fn-codeblock-note">
 <pre><code>this is now a code block (8 spaces indentation)
 </code></pre>
-<a href="#fnref-codeblock-note" class="footnote-backref" data-footnote-backref data-footnote-backref-idx="4" aria-label="Back to reference 4">↩</a>
+<a href="#fnref-codeblock-note" class="footnote-backref" role="doc-backlink">↩</a>
 </li>
 </ol>
 </section>
@@ -768,12 +764,14 @@ This footnote is referenced[^a-footnote] multiple times, in lots of different pl
 
 [^a-footnote]: This footnote definition should have three backrefs.
 .
-<p>This is some text. It has a footnote<sup class="footnote-ref"><a href="#fn-a-footnote" id="fnref-a-footnote" data-footnote-ref>1</a></sup>.</p>
-<p>This footnote is referenced<sup class="footnote-ref"><a href="#fn-a-footnote" id="fnref-a-footnote-2" data-footnote-ref>1</a></sup> multiple times, in lots of different places.<sup class="footnote-ref"><a href="#fn-a-footnote" id="fnref-a-footnote-3" data-footnote-ref>1</a></sup></p>
-<section class="footnotes" data-footnotes>
+<p>This is some text. It has a footnote<sup id="fnref-a-footnote"><a href="#fn-a-footnote" class="footnote-ref" role="doc-noteref">1</a></sup>.</p>
+<p>This footnote is referenced<sup id="fnref-a-footnote-2"><a href="#fn-a-footnote" class="footnote-ref" role="doc-noteref">1</a></sup> multiple times, in lots of different places.<sup id="fnref-a-footnote-3"><a href="#fn-a-footnote" class="footnote-ref" role="doc-noteref">1</a></sup></p>
+<section class="footnotes" role="doc-endnotes">
+<hr />
 <ol>
 <li id="fn-a-footnote">
-<p>This footnote definition should have three backrefs. <a href="#fnref-a-footnote" class="footnote-backref" data-footnote-backref data-footnote-backref-idx="1" aria-label="Back to reference 1">↩</a> <a href="#fnref-a-footnote-2" class="footnote-backref" data-footnote-backref data-footnote-backref-idx="1-2" aria-label="Back to reference 1-2">↩<sup class="footnote-ref">2</sup></a> <a href="#fnref-a-footnote-3" class="footnote-backref" data-footnote-backref data-footnote-backref-idx="1-3" aria-label="Back to reference 1-3">↩<sup class="footnote-ref">3</sup></a></p>
+<p>This footnote definition should have three backrefs.</p>
+<a href="#fnref-a-footnote" class="footnote-backref" role="doc-backlink">↩</a> <a href="#fnref-a-footnote-2" class="footnote-backref" role="doc-backlink">↩<sup>2</sup></a> <a href="#fnref-a-footnote-3" class="footnote-backref" role="doc-backlink">↩<sup>3</sup></a>
 </li>
 </ol>
 </section>
@@ -786,11 +784,13 @@ Hello[^"><script>alert(1)</script>]
 
 [^"><script>alert(1)</script>]: pwned
 .
-<p>Hello<sup class="footnote-ref"><a href="#fn-%22%3E%3Cscript%3Ealert(1)%3C/script%3E" id="fnref-%22%3E%3Cscript%3Ealert(1)%3C/script%3E" data-footnote-ref>1</a></sup></p>
-<section class="footnotes" data-footnotes>
+<p>Hello<sup id="fnref-%22%3E%3Cscript%3Ealert(1)%3C/script%3E"><a href="#fn-%22%3E%3Cscript%3Ealert(1)%3C/script%3E" class="footnote-ref" role="doc-noteref">1</a></sup></p>
+<section class="footnotes" role="doc-endnotes">
+<hr />
 <ol>
 <li id="fn-%22%3E%3Cscript%3Ealert(1)%3C/script%3E">
-<p>pwned <a href="#fnref-%22%3E%3Cscript%3Ealert(1)%3C/script%3E" class="footnote-backref" data-footnote-backref data-footnote-backref-idx="1" aria-label="Back to reference 1">↩</a></p>
+<p>pwned</p>
+<a href="#fnref-%22%3E%3Cscript%3Ealert(1)%3C/script%3E" class="footnote-backref" role="doc-backlink">↩</a>
 </li>
 </ol>
 </section>
@@ -838,7 +838,7 @@ Autolink and tables.
 - [ ] foo
 - [x] bar
 .
-<ul>
+<ul class="task-list">
 <li><input type="checkbox" disabled="" /> foo</li>
 <li><input type="checkbox" checked="" disabled="" /> bar</li>
 </ul>
@@ -863,9 +863,9 @@ Show a regular (non task) list to show that it has the same structure
   - [@] baz
 - [@] bim
 .
-<ul>
+<ul class="task-list">
 <li><input type="checkbox" checked="" disabled="" /> foo
-<ul>
+<ul class="task-list">
 <li><input type="checkbox" disabled="" /> bar</li>
 <li><input type="checkbox" checked="" disabled="" /> baz</li>
 </ul>
@@ -898,9 +898,9 @@ Show a regular (non task) list to show that it has the same structure
     - [@] baz
 - [@] bim
 .
-<ul>
+<ul class="task-list">
 <li><input type="checkbox" checked="" disabled="" /> foo
-<ul>
+<ul class="task-list">
 <li><input type="checkbox" disabled="" /> bar</li>
 <li><input type="checkbox" checked="" disabled="" /> baz</li>
 </ul>

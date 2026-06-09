@@ -25,6 +25,21 @@ fn math_modes_are_explicit() {
     assert!(to_xhtml("$x$", &opt).contains("<span class=\"math inline\">x</span>"));
 }
 
+#[test]
+fn tagfilter_is_opt_in() {
+    let input = "No <textarea>.\n\n<script>alert(1)</script>";
+    let default = to_xhtml(input, &Options::default());
+    assert!(default.contains("<textarea>"));
+    assert!(default.contains("<script>"));
+
+    let mut opt = Options::default();
+    opt.extensions.tagfilter = true;
+    let filtered = to_xhtml(input, &opt);
+    assert!(filtered.contains("&lt;textarea>"));
+    assert!(filtered.contains("&lt;script>"));
+    assert!(filtered.contains("&lt;/script>"));
+}
+
 fn normalize(s: &str) -> String {
     s.lines()
         .map(str::trim_end)
