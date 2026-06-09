@@ -99,7 +99,7 @@ fn parse_inner(src: &str, ctx: &InlineContext<'_>, depth: usize) -> Vec<Inline> 
             i += len;
             continue;
         }
-        if ctx.options.extensions.highlight && starts(src, i, "==") {
+        if starts(src, i, "==") {
             if let Some(end) = find_unescaped(src, i + 2, "==") {
                 let body = &src[i + 2..end];
                 if !body.is_empty() {
@@ -113,7 +113,7 @@ fn parse_inner(src: &str, ctx: &InlineContext<'_>, depth: usize) -> Vec<Inline> 
                 }
             }
         }
-        if ctx.options.extensions.superscript && starts(src, i, "^") {
+        if starts(src, i, "^") {
             if let Some(end) = superscript_end(src, i + 1) {
                 scanner.flush_text();
                 let item = Inline::Superscript {
@@ -160,27 +160,25 @@ fn parse_inner(src: &str, ctx: &InlineContext<'_>, depth: usize) -> Vec<Inline> 
             continue;
         }
         let ch = next_char(src, i);
-        if ch == '*' || ch == '_' || (ch == '~' && ctx.options.extensions.strikethrough) {
+        if ch == '*' || ch == '_' || ch == '~' {
             let len = count_char_run(src, i, ch);
             scanner.push_delimiter_run(i, ch, len);
             i += len;
             continue;
         }
-        if ctx.options.extensions.autolinks && starts(src, i, "<") {
-            if let Some((item, next)) = angle_or_html(src, i, ctx.options.extensions.tagfilter) {
+        if starts(src, i, "<") {
+            if let Some((item, next)) = angle_or_html(src, i, ctx.options.tagfilter) {
                 scanner.flush_text();
                 scanner.push_inline(item);
                 i = next;
                 continue;
             }
         }
-        if ctx.options.extensions.autolinks {
-            if let Some((item, next)) = bare_autolink(src, i) {
-                scanner.flush_text();
-                scanner.push_inline(item);
-                i = next;
-                continue;
-            }
+        if let Some((item, next)) = bare_autolink(src, i) {
+            scanner.flush_text();
+            scanner.push_inline(item);
+            i = next;
+            continue;
         }
         if starts(src, i, "\\") {
             if i + 1 < src.len() {
@@ -227,30 +225,26 @@ fn plain_text_fast_path(src: &str, ctx: &InlineContext<'_>) -> bool {
     {
         return false;
     }
-    if ctx.options.extensions.strikethrough && src.contains('~') {
+    if src.contains('~') {
         return false;
     }
-    if ctx.options.extensions.superscript && src.contains('^') {
+    if src.contains('^') {
         return false;
     }
-    if ctx.options.extensions.highlight && src.contains("==") {
+    if src.contains("==") {
         return false;
     }
     if ctx.options.math == MathMode::Dollars && src.contains('$') {
         return false;
     }
-    if ctx.options.extensions.footnotes && src.contains("[^") {
+    if src.contains("[^") {
         return false;
     }
-    if ctx.options.extensions.autolinks
-        && (src.contains("://") || src.contains("www.") || src.contains('@'))
-    {
+    if src.contains("://") || src.contains("www.") || src.contains('@') {
         return false;
     }
-    let can_link_or_span = src.contains("](")
-        || src.contains("][")
-        || (ctx.options.extensions.bracketed_spans && src.contains("]{"))
-        || !ctx.link_defs.is_empty();
+    let can_link_or_span =
+        src.contains("](") || src.contains("][") || src.contains("]{") || !ctx.link_defs.is_empty();
     !can_link_or_span
 }
 
@@ -280,14 +274,12 @@ impl InlineScanner<'_, '_> {
 
     fn push_with_attrs(&mut self, mut item: Inline, i: usize) -> usize {
         let mut next = i;
-        if self.ctx.options.extensions.attributes {
-            while let Some((attr, n)) = trailing_attr(&self.src[next..], self.ctx.attr_defs) {
-                if let Some(dst) = item.attrs_mut() {
-                    dst.merge(&attr);
-                    next += n;
-                } else {
-                    break;
-                }
+        while let Some((attr, n)) = trailing_attr(&self.src[next..], self.ctx.attr_defs) {
+            if let Some(dst) = item.attrs_mut() {
+                dst.merge(&attr);
+                next += n;
+            } else {
+                break;
             }
         }
         self.push_inline(item);
@@ -414,7 +406,7 @@ impl InlineScanner<'_, '_> {
     }
 
     fn resolve_span(&self, image: bool, after: usize) -> Option<(Inline, usize, bool)> {
-        if image || !self.ctx.options.extensions.bracketed_spans {
+        if image {
             return None;
         }
         let (attrs, n) = parse_braced_attr(&self.src[after..], self.ctx.attr_defs)?;
@@ -478,14 +470,12 @@ impl InlineScanner<'_, '_> {
 
     fn apply_trailing_attrs(&mut self, node: usize, i: usize) -> usize {
         let mut next = i;
-        if self.ctx.options.extensions.attributes {
-            while let Some((attr, n)) = trailing_attr(&self.src[next..], self.ctx.attr_defs) {
-                if let Some(dst) = self.nodes[node].inline.attrs_mut() {
-                    dst.merge(&attr);
-                    next += n;
-                } else {
-                    break;
-                }
+        while let Some((attr, n)) = trailing_attr(&self.src[next..], self.ctx.attr_defs) {
+            if let Some(dst) = self.nodes[node].inline.attrs_mut() {
+                dst.merge(&attr);
+                next += n;
+            } else {
+                break;
             }
         }
         next
@@ -1333,7 +1323,7 @@ fn valid_footnote_label(s: &str) -> bool {
 }
 
 fn footnote_ref(src: &str, i: usize, ctx: &InlineContext<'_>) -> Option<(String, usize)> {
-    if !ctx.options.extensions.footnotes || !starts(src, i, "[^") {
+    if !starts(src, i, "[^") {
         return None;
     }
     let end = src[i + 2..].find(']')?;

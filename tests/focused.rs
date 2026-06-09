@@ -1,9 +1,9 @@
 use xhtml_md_parser::{to_xhtml, Options};
 
 #[test]
-fn focused_extensions_fixture() {
-    let input = include_str!("fixtures/extensions.md");
-    let expected = include_str!("fixtures/extensions.xhtml");
+fn focused_dialect_fixture() {
+    let input = include_str!("fixtures/dialect.md");
+    let expected = include_str!("fixtures/dialect.xhtml");
     assert_eq!(
         normalize(&to_xhtml(input, &Options::default())),
         normalize(expected)
@@ -33,7 +33,7 @@ fn tagfilter_is_opt_in() {
     assert!(default.contains("<script>"));
 
     let mut opt = Options::default();
-    opt.extensions.tagfilter = true;
+    opt.tagfilter = true;
     let filtered = to_xhtml(input, &opt);
     assert!(filtered.contains("&lt;textarea>"));
     assert!(filtered.contains("&lt;script>"));

@@ -24,50 +24,9 @@ pub enum MathMode {
 }
 
 #[derive(Clone, Debug)]
-pub struct Extensions {
-    pub tables: bool,
-    pub html_markdown: bool,
-    pub attributes: bool,
-    pub definition_lists: bool,
-    pub footnotes: bool,
-    pub task_lists: bool,
-    pub strikethrough: bool,
-    pub superscript: bool,
-    pub highlight: bool,
-    pub autolinks: bool,
-    pub fenced_code: bool,
-    pub fenced_divs: bool,
-    pub bracketed_spans: bool,
-    pub raw_html: bool,
-    pub tagfilter: bool,
-}
-
-impl Default for Extensions {
-    fn default() -> Self {
-        Self {
-            tables: true,
-            html_markdown: true,
-            attributes: true,
-            definition_lists: true,
-            footnotes: true,
-            task_lists: true,
-            strikethrough: true,
-            superscript: true,
-            highlight: true,
-            autolinks: true,
-            fenced_code: true,
-            fenced_divs: true,
-            bracketed_spans: true,
-            raw_html: true,
-            tagfilter: false,
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
 pub struct Options {
     pub math: MathMode,
-    pub extensions: Extensions,
+    pub tagfilter: bool,
     pub max_inline_depth: usize,
     pub max_block_depth: usize,
     pub max_link_paren_depth: usize,
@@ -77,7 +36,7 @@ impl Default for Options {
     fn default() -> Self {
         Self {
             math: MathMode::Dollars,
-            extensions: Extensions::default(),
+            tagfilter: false,
             max_inline_depth: 64,
             max_block_depth: 128,
             max_link_paren_depth: 32,

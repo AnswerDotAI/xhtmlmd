@@ -303,23 +303,21 @@ impl Parser {
                 self.i += 1;
                 continue;
             }
-            if self.options.extensions.attributes {
-                if let Some(al) = parse_attr_line(self.line(), &self.attr_defs) {
-                    match al {
-                        AttrLine::Ald(name, attr) => {
-                            self.attr_defs.entry(name).or_default().merge(&attr);
-                        }
-                        AttrLine::Ial(attr) => {
-                            if let Some(last) = blocks.last_mut().and_then(DraftBlock::attrs_mut) {
-                                last.merge(&attr);
-                            } else {
-                                pending.merge(&attr);
-                            }
+            if let Some(al) = parse_attr_line(self.line(), &self.attr_defs) {
+                match al {
+                    AttrLine::Ald(name, attr) => {
+                        self.attr_defs.entry(name).or_default().merge(&attr);
+                    }
+                    AttrLine::Ial(attr) => {
+                        if let Some(last) = blocks.last_mut().and_then(DraftBlock::attrs_mut) {
+                            last.merge(&attr);
+                        } else {
+                            pending.merge(&attr);
                         }
                     }
-                    self.i += 1;
-                    continue;
                 }
+                self.i += 1;
+                continue;
             }
             if let Some((label, lr, next)) = self.parse_link_ref_at(self.i) {
                 self.add_link_def(label, lr);
@@ -569,10 +567,7 @@ impl<'a> ContainerBuilder<'a> {
         }
         if content.trim().is_empty() {
             if self.stack.len() == 1 {
-                if self.options.extensions.definition_lists
-                    && self.leaf_open
-                    && next_nonblank.is_some_and(|next| def_marker(next).is_some())
-                {
+                if self.leaf_open && next_nonblank.is_some_and(|next| def_marker(next).is_some()) {
                     self.leaf_open = false;
                     self.can_lazy = false;
                     return true;
@@ -835,11 +830,7 @@ impl<'a> ContainerBuilder<'a> {
 
     fn prepare_item_head(&mut self, item: usize, content: &mut String) {
         let mut first = content.clone();
-        let (attrs, checked) = prepare_list_item(
-            std::slice::from_mut(&mut first),
-            self.attr_defs,
-            self.options,
-        );
+        let (attrs, checked) = prepare_list_item(std::slice::from_mut(&mut first), self.attr_defs);
         if let BuildKind::ListItem {
             attrs: item_attrs,
             checked: item_checked,
@@ -966,20 +957,13 @@ impl<'a> ContainerBuilder<'a> {
             .map(|line| line.trim())
             .collect::<Vec<_>>()
             .join("\n");
-        let (text, attrs) = if self.options.extensions.attributes {
-            strip_trailing_attr(&body, self.attr_defs)
-        } else {
-            (body, Attr::default())
-        };
+        let (text, attrs) = strip_trailing_attr(&body, self.attr_defs);
         self.nodes[last].kind = BuildKind::Heading { level, attrs, text };
         true
     }
 
     fn convert_paragraph_to_table(&mut self, line: &str) -> bool {
         if !self.leaf_open {
-            return false;
-        }
-        if !self.options.extensions.tables {
             return false;
         }
         let Some(last) = self.last_child() else {
@@ -1078,9 +1062,6 @@ impl<'a> ContainerBuilder<'a> {
     }
 
     fn convert_paragraph_to_definition_list(&mut self, line: &str) -> bool {
-        if !self.options.extensions.definition_lists {
-            return false;
-        }
         let Some(first) = def_marker(line) else {
             return false;
         };
@@ -1122,9 +1103,6 @@ impl<'a> ContainerBuilder<'a> {
     }
 
     fn open_footnote(&mut self, line: &str) -> bool {
-        if !self.options.extensions.footnotes {
-            return false;
-        }
         let Some((label, first)) = footnote_start(line) else {
             return false;
         };
@@ -1138,9 +1116,6 @@ impl<'a> ContainerBuilder<'a> {
     }
 
     fn open_fenced_div(&mut self, line: &str) -> bool {
-        if !self.options.extensions.fenced_divs {
-            return false;
-        }
         let Some((fence_len, attrs)) = fenced_div_start(line, self.attr_defs) else {
             return false;
         };
@@ -1150,9 +1125,6 @@ impl<'a> ContainerBuilder<'a> {
     }
 
     fn open_html_markdown(&mut self, line: &str) -> bool {
-        if !self.options.extensions.html_markdown {
-            return false;
-        }
         let Some(open) = parse_open_tag(line) else {
             return false;
         };
@@ -1230,11 +1202,7 @@ impl<'a> ContainerBuilder<'a> {
             return false;
         }
         let body = t[n..].trim().to_string();
-        let (mut text, attrs) = if self.options.extensions.attributes {
-            strip_trailing_attr(&body, self.attr_defs)
-        } else {
-            (body, Attr::default())
-        };
+        let (mut text, attrs) = strip_trailing_attr(&body, self.attr_defs);
         if let Some(pos) = closing_hashes(&text) {
             text = text[..pos].trim_end().to_string();
         }
@@ -1290,11 +1258,8 @@ impl<'a> ContainerBuilder<'a> {
     }
 
     fn open_html_block(&mut self, line: &str) -> bool {
-        if !self.options.extensions.raw_html {
-            return false;
-        }
         let t = line.trim_start();
-        if self.options.extensions.tagfilter && is_tagfiltered_start(t) {
+        if self.options.tagfilter && is_tagfiltered_start(t) {
             return false;
         }
         let Some((end, closed)) = balanced_html_block_start(t).or_else(|| {
@@ -1435,9 +1400,6 @@ impl<'a> ContainerBuilder<'a> {
     }
 
     fn open_fenced_code(&mut self, line: &str) -> bool {
-        if !self.options.extensions.fenced_code {
-            return false;
-        }
         let Some((ch, len, fence_indent, info)) =
             fence_start(line, '`').or_else(|| fence_start(line, '~'))
         else {
@@ -1616,8 +1578,7 @@ impl<'a> ContainerBuilder<'a> {
     }
 
     fn can_continue_definition_term(&self, content: &str) -> bool {
-        self.options.extensions.definition_lists
-            && def_marker(content).is_some()
+        def_marker(content).is_some()
             && self
                 .last_child()
                 .is_some_and(|idx| matches!(self.nodes[idx].kind, BuildKind::Paragraph { .. }))
@@ -1831,7 +1792,7 @@ impl<'a> ContainerBuilder<'a> {
                 text: text.clone(),
             }],
             BuildKind::HtmlBlock { raw, .. } => vec![DraftBlock::Html {
-                raw: if parser.options.extensions.tagfilter {
+                raw: if parser.options.tagfilter {
                     tagfilter_html(raw)
                 } else {
                     raw.clone()
@@ -1879,12 +1840,7 @@ impl<'a> ContainerBuilder<'a> {
     fn finish_paragraph(&self, lines: &[String], parser: &mut Parser) -> Vec<DraftBlock> {
         let mut i = 0;
         while i < lines.len() {
-            if let Some((label, link_ref, next)) = parse_link_ref_at(
-                lines,
-                i,
-                parser.options.extensions.attributes,
-                &parser.attr_defs,
-            ) {
+            if let Some((label, link_ref, next)) = parse_link_ref_at(lines, i, &parser.attr_defs) {
                 parser.add_link_def(label, link_ref);
                 i = next;
                 continue;
@@ -1901,12 +1857,11 @@ impl<'a> ContainerBuilder<'a> {
             .join("\n")
             .trim_end()
             .to_string();
-        let (text, attrs) =
-            if parser.options.extensions.attributes && has_block_trailing_attr(&joined) {
-                strip_trailing_attr(&joined, &parser.attr_defs)
-            } else {
-                (joined, Attr::default())
-            };
+        let (text, attrs) = if has_block_trailing_attr(&joined) {
+            strip_trailing_attr(&joined, &parser.attr_defs)
+        } else {
+            (joined, Attr::default())
+        };
         vec![DraftBlock::Paragraph { attrs, text }]
     }
 
@@ -1975,19 +1930,13 @@ fn strip_one_quote_marker_slice(line: &str) -> Option<&str> {
 
 impl Parser {
     fn parse_link_ref_at(&self, i: usize) -> Option<(String, LinkRef, usize)> {
-        parse_link_ref_at(
-            &self.lines,
-            i,
-            self.options.extensions.attributes,
-            &self.attr_defs,
-        )
+        parse_link_ref_at(&self.lines, i, &self.attr_defs)
     }
 }
 
 fn parse_link_ref_at(
     lines: &[String],
     i: usize,
-    attributes: bool,
     attr_defs: &HashMap<String, Attr>,
 ) -> Option<(String, LinkRef, usize)> {
     let line = lines.get(i)?;
@@ -2030,17 +1979,17 @@ fn parse_link_ref_at(
         let (parsed, attr_tail, used_next) =
             scan_link_ref_title_lines(tail.to_string(), lines, next)?;
         title = Some(parsed);
-        attrs = parse_link_ref_attrs(&attr_tail, attributes, attr_defs)?;
+        attrs = parse_link_ref_attrs(&attr_tail, attr_defs)?;
         next = used_next;
     } else if !tail.trim().is_empty() {
-        attrs = parse_link_ref_attrs(tail, attributes, attr_defs)?;
+        attrs = parse_link_ref_attrs(tail, attr_defs)?;
     } else if next < lines.len() && !lines[next].trim().is_empty() {
         let candidate = lines[next].trim_start();
         if starts_definition_title(candidate) {
             if let Some((parsed, attr_tail, used_next)) =
                 scan_link_ref_title_lines(candidate.to_string(), lines, next + 1)
             {
-                if let Some(parsed_attrs) = parse_link_ref_attrs(&attr_tail, attributes, attr_defs) {
+                if let Some(parsed_attrs) = parse_link_ref_attrs(&attr_tail, attr_defs) {
                     title = Some(parsed);
                     attrs = parsed_attrs;
                     next = used_next;
@@ -2051,17 +2000,10 @@ fn parse_link_ref_at(
     Some((label, LinkRef { url, title, attrs }, next))
 }
 
-fn parse_link_ref_attrs(
-    tail: &str,
-    attributes: bool,
-    attr_defs: &HashMap<String, Attr>,
-) -> Option<Attr> {
+fn parse_link_ref_attrs(tail: &str, attr_defs: &HashMap<String, Attr>) -> Option<Attr> {
     let tail = tail.trim();
     if tail.is_empty() {
         return Some(Attr::default());
-    }
-    if !attributes {
-        return None;
     }
     let (attrs, used) = parse_braced_attr(tail, attr_defs)?;
     tail[used..].trim().is_empty().then_some(attrs)
@@ -2936,11 +2878,7 @@ fn list_marker(line: &str) -> Option<Marker> {
     None
 }
 
-fn prepare_list_item(
-    lines: &mut [String],
-    defs: &HashMap<String, Attr>,
-    options: &Options,
-) -> (Attr, Option<bool>) {
+fn prepare_list_item(lines: &mut [String], defs: &HashMap<String, Attr>) -> (Attr, Option<bool>) {
     let mut attrs = Attr::default();
     let mut checked = None;
     if lines.is_empty() {
@@ -2948,7 +2886,7 @@ fn prepare_list_item(
     }
     let mut first = lines[0].clone();
     let mut trimmed = first.trim_start();
-    if options.extensions.attributes && trimmed.starts_with("{:") {
+    if trimmed.starts_with("{:") {
         if let Some(AttrLine::Ial(a)) = parse_attr_line(trimmed, defs) {
             attrs.merge(&a);
             first.clear();
@@ -2962,15 +2900,13 @@ fn prepare_list_item(
             }
         }
     }
-    if options.extensions.task_lists {
-        let low = trimmed.to_ascii_lowercase();
-        if low.starts_with("[ ] ") {
-            checked = Some(false);
-            first = trimmed[4..].to_string();
-        } else if low.starts_with("[x] ") {
-            checked = Some(true);
-            first = trimmed[4..].to_string();
-        }
+    let low = trimmed.to_ascii_lowercase();
+    if low.starts_with("[ ] ") {
+        checked = Some(false);
+        first = trimmed[4..].to_string();
+    } else if low.starts_with("[x] ") {
+        checked = Some(true);
+        first = trimmed[4..].to_string();
     }
     lines[0] = first;
     (attrs, checked)
