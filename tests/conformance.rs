@@ -2,6 +2,8 @@ use ego_tree::NodeRef;
 use scraper::{Html, Node};
 use std::collections::BTreeMap;
 use std::env;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread;
 use std::time::Duration;
@@ -13,6 +15,12 @@ const MF_SPEC: &str = include_str!("source/mf.txt");
 const FENCE: &str = "````````````````````````````````";
 const MAX_FAILURES_TO_PRINT: usize = 20;
 const CASE_TIMEOUT: Duration = Duration::from_secs(15);
+const PHP_EXTRA_ACTIVE: &[&str] = &[
+    "Headers with attributes",
+    "Tables",
+    "Link & Image Attributes",
+    "Definition Lists",
+];
 
 #[test]
 fn markdown_spec_report() {
@@ -20,6 +28,11 @@ fn markdown_spec_report() {
         parse_cmark_examples("spec.txt", CMARK_GFM_SPEC),
         parse_cmark_examples("extensions.txt", CMARK_GFM_EXTENSIONS),
         parse_cmark_examples("mf.txt", MF_SPEC),
+        parse_mdtest_examples(
+            "php-markdown-extra.mdtest",
+            "tests/source/php-markdown-extra.mdtest",
+            PHP_EXTRA_ACTIVE,
+        ),
     ]
     .concat();
     if let Ok(section) = env::var("XHTML_MD_CONFORMANCE_SECTION") {
@@ -55,7 +68,7 @@ fn markdown_spec_report() {
             entry.1 += 1;
         } else {
             failures.push(Failure {
-                source: case.source,
+                source: case.source.clone(),
                 example: case.example,
                 section: case.section.clone(),
                 markdown: case.markdown.clone(),
@@ -123,7 +136,7 @@ fn render_with_timeout(case: &CmarkExample) -> String {
 
 #[derive(Clone, Debug)]
 struct CmarkExample {
-    source: &'static str,
+    source: String,
     example: usize,
     section: String,
     markdown: String,
@@ -132,7 +145,7 @@ struct CmarkExample {
 
 #[derive(Clone, Debug)]
 struct Failure {
-    source: &'static str,
+    source: String,
     example: usize,
     section: String,
     markdown: String,
@@ -181,7 +194,7 @@ fn parse_cmark_examples(source_name: &'static str, source: &str) -> Vec<CmarkExa
                     example += 1;
                     if !extensions.iter().any(|ext| ext == "disabled") {
                         out.push(CmarkExample {
-                            source: source_name,
+                            source: source_name.to_string(),
                             example,
                             section: section.clone(),
                             markdown: markdown.replace('→', "\t"),
@@ -197,6 +210,40 @@ fn parse_cmark_examples(source_name: &'static str, source: &str) -> Vec<CmarkExa
     }
 
     out
+}
+
+fn parse_mdtest_examples(
+    source_name: &'static str,
+    rel_dir: &str,
+    active: &[&str],
+) -> Vec<CmarkExample> {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join(rel_dir);
+    let mut out = Vec::new();
+    for (i, stem) in active.iter().enumerate() {
+        let input = dir.join(format!("{stem}.text"));
+        let expected = expected_mdtest_path(&input);
+        let markdown = fs::read_to_string(&input)
+            .unwrap_or_else(|err| panic!("failed to read {}: {err}", input.display()));
+        let html = fs::read_to_string(&expected)
+            .unwrap_or_else(|err| panic!("failed to read {}: {err}", expected.display()));
+        out.push(CmarkExample {
+            source: source_name.to_string(),
+            example: i + 1,
+            section: format!("PHP Markdown Extra: {stem}"),
+            markdown,
+            html,
+        });
+    }
+    out
+}
+
+fn expected_mdtest_path(input: &Path) -> PathBuf {
+    let xhtml = input.with_extension("xhtml");
+    if xhtml.exists() {
+        xhtml
+    } else {
+        input.with_extension("html")
+    }
 }
 
 fn heading_text(line: &str) -> Option<String> {

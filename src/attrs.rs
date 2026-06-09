@@ -123,14 +123,8 @@ pub fn parse_attrs_body(body: &str, defs: &HashMap<String, Attr>) -> Attr {
             out.merge(referenced);
             continue;
         }
-        if let Some(id) = token.strip_prefix('#') {
-            if !id.is_empty() {
-                out.id = Some(unescape_attr(id));
-            }
-        } else if let Some(class) = token.strip_prefix('.') {
-            if !class.is_empty() {
-                out.push_class(unescape_attr(class));
-            }
+        if token.starts_with('#') || token.starts_with('.') {
+            parse_compact_attr_token(&token, &mut out);
         } else if let Some(pos) = token.find('=') {
             let key = token[..pos].trim();
             if key.is_empty() {
@@ -141,6 +135,44 @@ pub fn parse_attrs_body(body: &str, defs: &HashMap<String, Attr>) -> Attr {
         }
     }
     out
+}
+
+fn parse_compact_attr_token(token: &str, out: &mut Attr) {
+    let mut marker = None;
+    let mut start = 0usize;
+    let mut escaped = false;
+    for (i, ch) in token.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' {
+            escaped = true;
+            continue;
+        }
+        if ch == '#' || ch == '.' {
+            if let Some(marker) = marker {
+                push_compact_attr(marker, &token[start..i], out);
+            }
+            marker = Some(ch);
+            start = i + ch.len_utf8();
+        }
+    }
+    if let Some(marker) = marker {
+        push_compact_attr(marker, &token[start..], out);
+    }
+}
+
+fn push_compact_attr(marker: char, raw: &str, out: &mut Attr) {
+    if raw.is_empty() {
+        return;
+    }
+    let value = unescape_attr(raw);
+    if marker == '#' {
+        out.id = Some(value);
+    } else {
+        out.push_class(value);
+    }
 }
 
 pub fn parse_html_attrs(raw: &str) -> (Attr, Option<String>) {

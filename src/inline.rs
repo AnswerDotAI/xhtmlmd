@@ -702,14 +702,14 @@ fn collect_node_inlines(nodes: &[Node], start: usize, end: usize) -> Vec<Inline>
 fn link_or_image_shell(image: bool, lr: &LinkRef) -> Inline {
     if image {
         Inline::Image {
-            attrs: Attr::default(),
+            attrs: lr.attrs.clone(),
             alt: Vec::new(),
             url: lr.url.clone(),
             title: lr.title.clone(),
         }
     } else {
         Inline::Link {
-            attrs: Attr::default(),
+            attrs: lr.attrs.clone(),
             children: Vec::new(),
             url: lr.url.clone(),
             title: lr.title.clone(),

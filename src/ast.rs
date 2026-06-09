@@ -71,6 +71,7 @@ impl Default for Align {
 pub struct LinkRef {
     pub url: String,
     pub title: Option<String>,
+    pub attrs: Attr,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -95,8 +96,14 @@ pub struct ListItem {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct DefinitionItem {
-    pub term: Vec<Inline>,
-    pub definitions: Vec<Vec<Block>>,
+    pub terms: Vec<Vec<Inline>>,
+    pub definitions: Vec<Definition>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Definition {
+    pub tight: bool,
+    pub blocks: Vec<Block>,
 }
 
 #[derive(Clone, Debug, PartialEq)]

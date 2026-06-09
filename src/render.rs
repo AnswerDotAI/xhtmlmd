@@ -71,12 +71,19 @@ impl<'a> Renderer<'a> {
                 attrs_html(attrs, out);
                 out.push_str(">\n");
                 for item in items {
-                    out.push_str("<dt>");
-                    self.inlines(&item.term, out);
-                    out.push_str("</dt>\n");
+                    for term in &item.terms {
+                        out.push_str("<dt>");
+                        self.inlines(term, out);
+                        out.push_str("</dt>\n");
+                    }
                     for def in &item.definitions {
-                        out.push_str("<dd>\n");
-                        self.blocks(def, out);
+                        out.push_str("<dd>");
+                        if def.tight {
+                            self.tight_definition(&def.blocks, out);
+                        } else {
+                            out.push('\n');
+                            self.blocks(&def.blocks, out);
+                        }
                         out.push_str("</dd>\n");
                     }
                 }
@@ -195,6 +202,17 @@ impl<'a> Renderer<'a> {
         out.push_str("</");
         out.push_str(tag);
         out.push_str(">\n");
+    }
+
+    fn tight_definition(&mut self, blocks: &[Block], out: &mut String) {
+        if let [Block::Paragraph { attrs, children }] = blocks {
+            if attrs.is_empty() {
+                self.inlines(children, out);
+                return;
+            }
+        }
+        out.push('\n');
+        self.blocks(blocks, out);
     }
 
     fn table(

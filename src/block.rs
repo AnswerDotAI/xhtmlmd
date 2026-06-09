@@ -1,7 +1,9 @@
-use crate::ast::{Align, Attr, Block, DefinitionItem, Document, Footnote, LinkRef, ListItem};
+use crate::ast::{
+    Align, Attr, Block, Definition, DefinitionItem, Document, Footnote, LinkRef, ListItem,
+};
 use crate::attrs::{
-    normalize_label, parse_attr_line, parse_fence_info, parse_html_attrs, strip_trailing_attr,
-    valid_link_label, AttrLine,
+    normalize_label, parse_attr_line, parse_braced_attr, parse_fence_info, parse_html_attrs,
+    strip_trailing_attr, valid_link_label, AttrLine,
 };
 use crate::entity::decode_entities;
 use crate::inline::{parse_inlines, InlineContext};
@@ -63,8 +65,13 @@ struct DraftListItem {
 }
 
 struct DraftDefinitionItem {
-    term: String,
-    definitions: Vec<Vec<DraftBlock>>,
+    terms: Vec<String>,
+    definitions: Vec<DraftDefinition>,
+}
+
+struct DraftDefinition {
+    tight: bool,
+    blocks: Vec<DraftBlock>,
 }
 
 enum DraftBlock {
@@ -202,11 +209,18 @@ fn finalize_block(block: DraftBlock, ctx: &InlineContext<'_>) -> Block {
             items: items
                 .into_iter()
                 .map(|item| DefinitionItem {
-                    term: parse_inlines(&item.term, ctx),
+                    terms: item
+                        .terms
+                        .into_iter()
+                        .map(|term| parse_inlines(&term, ctx))
+                        .collect(),
                     definitions: item
                         .definitions
                         .into_iter()
-                        .map(|blocks| finalize_blocks(blocks, ctx))
+                        .map(|def| Definition {
+                            tight: def.tight,
+                            blocks: finalize_blocks(def.blocks, ctx),
+                        })
                         .collect(),
                 })
                 .collect(),
@@ -307,7 +321,7 @@ impl Parser {
                     continue;
                 }
             }
-            if let Some((label, lr, next)) = parse_link_ref_at(&self.lines, self.i) {
+            if let Some((label, lr, next)) = self.parse_link_ref_at(self.i) {
                 self.add_link_def(label, lr);
                 self.i = next;
                 continue;
@@ -319,7 +333,7 @@ impl Parser {
                     pending = Attr::default();
                 }
             }
-            blocks.extend(parsed);
+            append_blocks(&mut blocks, parsed);
         }
         blocks
     }
@@ -354,6 +368,46 @@ impl Parser {
             self.i += 1;
         }
         builder.finish(self, depth + 1)
+    }
+}
+
+fn append_blocks(blocks: &mut Vec<DraftBlock>, parsed: Vec<DraftBlock>) {
+    for block in parsed {
+        match block {
+            DraftBlock::DefinitionList { attrs, mut items } => {
+                if let Some(DraftBlock::DefinitionList {
+                    attrs: last_attrs,
+                    items: last_items,
+                }) = blocks.last_mut()
+                {
+                    if *last_attrs == attrs {
+                        last_items.append(&mut items);
+                        continue;
+                    }
+                }
+                blocks.push(DraftBlock::DefinitionList { attrs, items });
+            }
+            block => blocks.push(block),
+        }
+    }
+}
+
+fn mark_definition_blank(kind: &mut BuildKind) {
+    if let BuildKind::DefinitionDefinition { pending_blank, .. } = kind {
+        *pending_blank = true;
+    }
+}
+
+fn mark_definition_content(kind: &mut BuildKind) {
+    if let BuildKind::DefinitionDefinition {
+        loose,
+        pending_blank,
+    } = kind
+    {
+        if *pending_blank {
+            *loose = true;
+            *pending_blank = false;
+        }
     }
 }
 
@@ -397,9 +451,12 @@ enum BuildKind {
         attrs: Attr,
     },
     DefinitionItem {
-        term: String,
+        terms: Vec<String>,
     },
-    DefinitionDefinition,
+    DefinitionDefinition {
+        loose: bool,
+        pending_blank: bool,
+    },
     Div {
         attrs: Attr,
         fence_len: usize,
@@ -449,6 +506,7 @@ enum BuildKind {
         aligns: Vec<Align>,
         head: Vec<String>,
         rows: Vec<Vec<String>>,
+        trim_leading_body_pipe: bool,
     },
 }
 
@@ -503,11 +561,22 @@ impl<'a> ContainerBuilder<'a> {
         {
             return false;
         }
-        if self.at_root_after_complete_block() && !self.leaf_open {
+        if self.at_root_after_complete_block()
+            && !self.leaf_open
+            && !self.can_continue_definition_term(&content)
+        {
             return false;
         }
         if content.trim().is_empty() {
             if self.stack.len() == 1 {
+                if self.options.extensions.definition_lists
+                    && self.leaf_open
+                    && next_nonblank.is_some_and(|next| def_marker(next).is_some())
+                {
+                    self.leaf_open = false;
+                    self.can_lazy = false;
+                    return true;
+                }
                 return false;
             }
             if self.current_is_list() || self.current_is_definition_item() {
@@ -585,7 +654,7 @@ impl<'a> ContainerBuilder<'a> {
                         break;
                     }
                 }
-                BuildKind::DefinitionDefinition => {
+                BuildKind::DefinitionDefinition { .. } => {
                     if content.trim().is_empty() {
                         matched = depth + 1;
                         content.clear();
@@ -594,13 +663,17 @@ impl<'a> ContainerBuilder<'a> {
                     if def_marker(content).is_some() {
                         break;
                     }
+                    if !self.leaf_open && indent(content) < 4 {
+                        matched = depth.saturating_sub(2);
+                        break;
+                    }
                     if indent(content) <= 3
                         && (starts_block(content) || list_marker(content).is_some())
                     {
                         matched = depth.saturating_sub(2);
                         break;
                     }
-                    *content = strip_indent(content, 2);
+                    *content = strip_indent(content, 4);
                     matched = depth + 1;
                 }
                 BuildKind::Div { fence_len, .. } => {
@@ -937,6 +1010,7 @@ impl<'a> ContainerBuilder<'a> {
             aligns,
             head,
             rows: Vec::new(),
+            trim_leading_body_pipe: header_line.trim_start().starts_with('|'),
         };
         if paragraph_len == 1 {
             self.nodes[last].kind = table;
@@ -956,13 +1030,19 @@ impl<'a> ContainerBuilder<'a> {
         let Some(last) = self.last_child() else {
             return false;
         };
-        let BuildKind::Table { aligns, rows, .. } = &mut self.nodes[last].kind else {
+        let BuildKind::Table {
+            aligns,
+            rows,
+            trim_leading_body_pipe,
+            ..
+        } = &mut self.nodes[last].kind
+        else {
             return false;
         };
         if line.trim().is_empty() || (starts_block(line) && !line.contains('|')) {
             return false;
         }
-        let mut row = split_table_body_row(line);
+        let mut row = split_table_body_row(line, *trim_leading_body_pipe);
         row.resize(aligns.len(), String::new());
         rows.push(
             row.into_iter()
@@ -980,8 +1060,15 @@ impl<'a> ContainerBuilder<'a> {
         let Some(item) = self.current_definition_item() else {
             return false;
         };
+        let loose = self.definition_item_ended_with_blank(item);
         self.truncate_to_stack_node(item);
-        let def = self.push_child(item, BuildKind::DefinitionDefinition);
+        let def = self.push_child(
+            item,
+            BuildKind::DefinitionDefinition {
+                loose,
+                pending_blank: false,
+            },
+        );
         self.stack.push(def);
         self.leaf_open = false;
         if !first.is_empty() {
@@ -1006,17 +1093,24 @@ impl<'a> ContainerBuilder<'a> {
         if lines.is_empty() {
             return false;
         }
-        let term = lines
+        let terms = lines
             .iter()
             .map(|line| line.trim())
-            .collect::<Vec<_>>()
-            .join("\n");
+            .filter(|line| !line.is_empty())
+            .map(str::to_string)
+            .collect::<Vec<_>>();
         self.nodes[last].kind = BuildKind::DefinitionList {
             attrs: Attr::default(),
         };
         self.nodes[last].children.clear();
-        let item = self.push_child(last, BuildKind::DefinitionItem { term });
-        let def = self.push_child(item, BuildKind::DefinitionDefinition);
+        let item = self.push_child(last, BuildKind::DefinitionItem { terms });
+        let def = self.push_child(
+            item,
+            BuildKind::DefinitionDefinition {
+                loose: !self.leaf_open,
+                pending_blank: false,
+            },
+        );
         self.stack.push(last);
         self.stack.push(item);
         self.stack.push(def);
@@ -1135,15 +1229,15 @@ impl<'a> ContainerBuilder<'a> {
         if !(1..=6).contains(&n) || (t.len() > n && !t.as_bytes()[n].is_ascii_whitespace()) {
             return false;
         }
-        let mut body = t[n..].trim().to_string();
-        if let Some(pos) = closing_hashes(&body) {
-            body = body[..pos].trim_end().to_string();
-        }
-        let (text, attrs) = if self.options.extensions.attributes {
+        let body = t[n..].trim().to_string();
+        let (mut text, attrs) = if self.options.extensions.attributes {
             strip_trailing_attr(&body, self.attr_defs)
         } else {
             (body, Attr::default())
         };
+        if let Some(pos) = closing_hashes(&text) {
+            text = text[..pos].trim_end().to_string();
+        }
         self.open_node(BuildKind::Heading {
             level: n as u8,
             attrs,
@@ -1297,13 +1391,13 @@ impl<'a> ContainerBuilder<'a> {
                         return None;
                     }
                 }
-                BuildKind::DefinitionDefinition => {
+                BuildKind::DefinitionDefinition { .. } => {
                     if content.trim().is_empty() {
                         content.clear();
                     } else if def_marker(&content).is_some() {
                         return None;
                     } else {
-                        content = strip_indent(&content, 2);
+                        content = strip_indent(&content, 4);
                     }
                 }
                 BuildKind::Root
@@ -1447,6 +1541,9 @@ impl<'a> ContainerBuilder<'a> {
 
     fn mark_blank(&mut self) {
         self.pending_blank_items.clear();
+        if let Some(idx) = self.current_definition_definition() {
+            mark_definition_blank(&mut self.nodes[idx].kind);
+        }
         for idx in self.stack.iter().rev().copied() {
             match self.nodes[idx].kind {
                 BuildKind::ListItem { .. } => self.pending_blank_items.push(idx),
@@ -1457,6 +1554,9 @@ impl<'a> ContainerBuilder<'a> {
     }
 
     fn mark_content(&mut self) {
+        if let Some(idx) = self.current_definition_definition() {
+            mark_definition_content(&mut self.nodes[idx].kind);
+        }
         if let Some(item) = self.current_list_item() {
             if self.pending_blank_items.contains(&item) {
                 if let BuildKind::ListItem { loose, .. } = &mut self.nodes[item].kind {
@@ -1492,6 +1592,35 @@ impl<'a> ContainerBuilder<'a> {
             .rev()
             .copied()
             .find(|idx| matches!(self.nodes[*idx].kind, BuildKind::DefinitionItem { .. }))
+    }
+
+    fn current_definition_definition(&self) -> Option<usize> {
+        self.stack.iter().rev().copied().find(|idx| {
+            matches!(
+                self.nodes[*idx].kind,
+                BuildKind::DefinitionDefinition { .. }
+            )
+        })
+    }
+
+    fn definition_item_ended_with_blank(&self, item: usize) -> bool {
+        self.nodes[item].children.last().is_some_and(|idx| {
+            matches!(
+                self.nodes[*idx].kind,
+                BuildKind::DefinitionDefinition {
+                    pending_blank: true,
+                    ..
+                }
+            )
+        })
+    }
+
+    fn can_continue_definition_term(&self, content: &str) -> bool {
+        self.options.extensions.definition_lists
+            && def_marker(content).is_some()
+            && self
+                .last_child()
+                .is_some_and(|idx| matches!(self.nodes[idx].kind, BuildKind::Paragraph { .. }))
     }
 
     fn truncate_to_stack_node(&mut self, idx: usize) {
@@ -1555,11 +1684,11 @@ impl<'a> ContainerBuilder<'a> {
                     }
                     content = strip_indent(&content, 4);
                 }
-                BuildKind::DefinitionDefinition => {
+                BuildKind::DefinitionDefinition { .. } => {
                     if def_marker(&content).is_some() {
                         return false;
                     }
-                    content = strip_indent(&content, 2);
+                    content = strip_indent(&content, 4);
                 }
                 BuildKind::Root
                 | BuildKind::FencedCode { .. }
@@ -1646,7 +1775,7 @@ impl<'a> ContainerBuilder<'a> {
                 }]
             }
             BuildKind::DefinitionItem { .. } => self.finish_children(idx, parser, depth),
-            BuildKind::DefinitionDefinition => self.finish_children(idx, parser, depth),
+            BuildKind::DefinitionDefinition { .. } => self.finish_children(idx, parser, depth),
             BuildKind::Div { attrs, .. } => vec![DraftBlock::Div {
                 attrs: attrs.clone(),
                 children: self.finish_children(idx, parser, depth),
@@ -1713,6 +1842,7 @@ impl<'a> ContainerBuilder<'a> {
                 aligns,
                 head,
                 rows,
+                ..
             } => vec![DraftBlock::Table {
                 attrs: attrs.clone(),
                 aligns: aligns.clone(),
@@ -1728,17 +1858,20 @@ impl<'a> ContainerBuilder<'a> {
         parser: &mut Parser,
         depth: usize,
     ) -> Option<DraftDefinitionItem> {
-        let BuildKind::DefinitionItem { term } = &self.nodes[idx].kind else {
+        let BuildKind::DefinitionItem { terms } = &self.nodes[idx].kind else {
             return None;
         };
         let mut definitions = Vec::new();
         for child in &self.nodes[idx].children {
-            if matches!(self.nodes[*child].kind, BuildKind::DefinitionDefinition) {
-                definitions.push(self.finish_children(*child, parser, depth + 1));
+            if let BuildKind::DefinitionDefinition { loose, .. } = &self.nodes[*child].kind {
+                definitions.push(DraftDefinition {
+                    tight: !*loose,
+                    blocks: self.finish_children(*child, parser, depth + 1),
+                });
             }
         }
         Some(DraftDefinitionItem {
-            term: term.clone(),
+            terms: terms.clone(),
             definitions,
         })
     }
@@ -1746,7 +1879,12 @@ impl<'a> ContainerBuilder<'a> {
     fn finish_paragraph(&self, lines: &[String], parser: &mut Parser) -> Vec<DraftBlock> {
         let mut i = 0;
         while i < lines.len() {
-            if let Some((label, link_ref, next)) = parse_link_ref_at(lines, i) {
+            if let Some((label, link_ref, next)) = parse_link_ref_at(
+                lines,
+                i,
+                parser.options.extensions.attributes,
+                &parser.attr_defs,
+            ) {
                 parser.add_link_def(label, link_ref);
                 i = next;
                 continue;
@@ -1835,7 +1973,23 @@ fn strip_one_quote_marker_slice(line: &str) -> Option<&str> {
     )
 }
 
-fn parse_link_ref_at(lines: &[String], i: usize) -> Option<(String, LinkRef, usize)> {
+impl Parser {
+    fn parse_link_ref_at(&self, i: usize) -> Option<(String, LinkRef, usize)> {
+        parse_link_ref_at(
+            &self.lines,
+            i,
+            self.options.extensions.attributes,
+            &self.attr_defs,
+        )
+    }
+}
+
+fn parse_link_ref_at(
+    lines: &[String],
+    i: usize,
+    attributes: bool,
+    attr_defs: &HashMap<String, Attr>,
+) -> Option<(String, LinkRef, usize)> {
     let line = lines.get(i)?;
     if indent(line) > 3 {
         return None;
@@ -1860,6 +2014,7 @@ fn parse_link_ref_at(lines: &[String], i: usize) -> Option<(String, LinkRef, usi
     }
     let (url, used) = scan_link_ref_destination(&rest)?;
     let mut title = None;
+    let mut attrs = Attr::default();
     let raw_tail = &rest[used..];
     if !raw_tail.is_empty()
         && !raw_tail
@@ -1872,23 +2027,44 @@ fn parse_link_ref_at(lines: &[String], i: usize) -> Option<(String, LinkRef, usi
     }
     let tail = raw_tail.trim_start();
     if starts_definition_title(tail) {
-        let (parsed, used_next) = scan_link_ref_title_lines(tail.to_string(), lines, next)?;
+        let (parsed, attr_tail, used_next) =
+            scan_link_ref_title_lines(tail.to_string(), lines, next)?;
         title = Some(parsed);
+        attrs = parse_link_ref_attrs(&attr_tail, attributes, attr_defs)?;
         next = used_next;
     } else if !tail.trim().is_empty() {
-        return None;
+        attrs = parse_link_ref_attrs(tail, attributes, attr_defs)?;
     } else if next < lines.len() && !lines[next].trim().is_empty() {
         let candidate = lines[next].trim_start();
         if starts_definition_title(candidate) {
-            if let Some((parsed, used_next)) =
+            if let Some((parsed, attr_tail, used_next)) =
                 scan_link_ref_title_lines(candidate.to_string(), lines, next + 1)
             {
-                title = Some(parsed);
-                next = used_next;
+                if let Some(parsed_attrs) = parse_link_ref_attrs(&attr_tail, attributes, attr_defs) {
+                    title = Some(parsed);
+                    attrs = parsed_attrs;
+                    next = used_next;
+                }
             }
         }
     }
-    Some((label, LinkRef { url, title }, next))
+    Some((label, LinkRef { url, title, attrs }, next))
+}
+
+fn parse_link_ref_attrs(
+    tail: &str,
+    attributes: bool,
+    attr_defs: &HashMap<String, Attr>,
+) -> Option<Attr> {
+    let tail = tail.trim();
+    if tail.is_empty() {
+        return Some(Attr::default());
+    }
+    if !attributes {
+        return None;
+    }
+    let (attrs, used) = parse_braced_attr(tail, attr_defs)?;
+    tail[used..].trim().is_empty().then_some(attrs)
 }
 
 fn scan_link_ref_label(lines: &[String], i: usize) -> Option<(String, String, usize)> {
@@ -2028,7 +2204,7 @@ fn scan_link_ref_title_lines(
     mut title_src: String,
     lines: &[String],
     mut next: usize,
-) -> Option<(String, usize)> {
+) -> Option<(String, String, usize)> {
     while !has_closing_definition_title(&title_src) && next < lines.len() {
         if lines[next].trim().is_empty() {
             return None;
@@ -2038,10 +2214,7 @@ fn scan_link_ref_title_lines(
         next += 1;
     }
     let (title, used) = scan_link_ref_title(&title_src)?;
-    title_src[used..]
-        .trim()
-        .is_empty()
-        .then_some((decode_entities(&title), next))
+    Some((decode_entities(&title), title_src[used..].to_string(), next))
 }
 
 fn scan_link_ref_title(s: &str) -> Option<(String, usize)> {
@@ -2811,7 +2984,7 @@ fn def_marker(line: &str) -> Option<String> {
     let mut chars = t.chars();
     let ch = chars.next()?;
     if (ch == ':' || ch == '~') && chars.next().map(|c| c.is_whitespace()).unwrap_or(false) {
-        Some(t[1..].trim_start().to_string())
+        Some(strip_indent(&t[1..], 3))
     } else {
         None
     }
@@ -2824,15 +2997,30 @@ fn split_table_row(line: &str) -> Option<Vec<String>> {
     Some(split_table_cells(line))
 }
 
-fn split_table_body_row(line: &str) -> Vec<String> {
+fn split_table_body_row(line: &str, trim_leading_pipe: bool) -> Vec<String> {
     if line.contains('|') {
-        split_table_cells(line)
+        let mut cells = raw_table_cells(line);
+        if trim_leading_pipe && cells.first().map(|s| s.is_empty()).unwrap_or(false) {
+            cells.remove(0);
+        }
+        cells
     } else {
         vec![line.trim().to_string()]
     }
 }
 
 fn split_table_cells(line: &str) -> Vec<String> {
+    let mut cells = raw_table_cells(line);
+    if cells.first().map(|s| s.is_empty()).unwrap_or(false) {
+        cells.remove(0);
+    }
+    if cells.last().map(|s| s.is_empty()).unwrap_or(false) {
+        cells.pop();
+    }
+    cells
+}
+
+fn raw_table_cells(line: &str) -> Vec<String> {
     let mut cells = Vec::new();
     let mut cur = String::new();
     let mut esc = false;
@@ -2862,12 +3050,6 @@ fn split_table_cells(line: &str) -> Vec<String> {
         cur.push('\\');
     }
     cells.push(cur.trim().to_string());
-    if cells.first().map(|s| s.is_empty()).unwrap_or(false) {
-        cells.remove(0);
-    }
-    if cells.last().map(|s| s.is_empty()).unwrap_or(false) {
-        cells.pop();
-    }
     cells
 }
 
