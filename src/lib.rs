@@ -14,7 +14,11 @@ pub use ast::{Align, Attr, Block, DefinitionItem, Document, Footnote, Inline, Li
 pub use render::to_xhtml_document;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum MathMode { Off, Brackets, Dollars }
+pub enum MathMode {
+    Off,
+    Brackets,
+    Dollars,
+}
 
 #[derive(Clone, Debug)]
 pub struct Extensions {
@@ -35,9 +39,18 @@ pub struct Extensions {
 impl Default for Extensions {
     fn default() -> Self {
         Self {
-            tables: true, html_markdown: true, attributes: true, definition_lists: true,
-            footnotes: true, task_lists: true, strikethrough: true, autolinks: true,
-            fenced_code: true, fenced_divs: true, bracketed_spans: true, raw_html: true,
+            tables: true,
+            html_markdown: true,
+            attributes: true,
+            definition_lists: true,
+            footnotes: true,
+            task_lists: true,
+            strikethrough: true,
+            autolinks: true,
+            fenced_code: true,
+            fenced_divs: true,
+            bracketed_spans: true,
+            raw_html: true,
         }
     }
 }
@@ -53,9 +66,19 @@ pub struct Options {
 
 impl Default for Options {
     fn default() -> Self {
-        Self { math: MathMode::Dollars, extensions: Extensions::default(), max_inline_depth: 64, max_block_depth: 128, max_link_paren_depth: 32 }
+        Self {
+            math: MathMode::Dollars,
+            extensions: Extensions::default(),
+            max_inline_depth: 64,
+            max_block_depth: 128,
+            max_link_paren_depth: 32,
+        }
     }
 }
 
-pub fn parse(src: &str, options: &Options) -> Document { block::parse_document(src, options) }
-pub fn to_xhtml(src: &str, options: &Options) -> String { render::to_xhtml_document(&parse(src, options)) }
+pub fn parse(src: &str, options: &Options) -> Document {
+    block::parse_document(src, options)
+}
+pub fn to_xhtml(src: &str, options: &Options) -> String {
+    render::to_xhtml_document(&parse(src, options))
+}
