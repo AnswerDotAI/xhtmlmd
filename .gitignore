@@ -144,8 +144,8 @@ docs_src/fastai
 tools/fastai
 
 # packaged native scripts
-python/xhtml_md_parser.data/scripts/*
-!python/xhtml_md_parser.data/scripts/.gitkeep
+python/xhtmlmd.data/scripts/*
+!python/xhtmlmd.data/scripts/.gitkeep
 
 # link checker
 checklink/cookies.txt

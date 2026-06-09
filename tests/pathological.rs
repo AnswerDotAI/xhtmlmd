@@ -1,7 +1,7 @@
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread;
 use std::time::{Duration, Instant};
-use xhtml_md_parser::{to_xhtml, Options};
+use xhtmlmd::{to_xhtml, Options};
 
 const WATCHDOG: Duration = Duration::from_secs(15);
 

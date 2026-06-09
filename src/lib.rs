@@ -1,4 +1,4 @@
-//! `xhtml-md-parser` is a small, dependency-free Markdown parser that targets
+//! `xhtmlmd` is a small, dependency-free Markdown parser that targets
 //! predictable, bounded-time parsing and a useful XHTML tree rather than exact
 //! source round-tripping. The dialect is CommonMark/GFM for the core and GFM
 //! features, with Pandoc choices for fenced divs, math, attributes, footnotes,

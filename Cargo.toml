@@ -1,20 +1,20 @@
 [package]
-name = "xhtml-md-parser"
+name = "xhtmlmd"
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 description = "A bounded-time, Pandoc-leaning Markdown parser with GFM, Extra/kramdown, math, fenced divs, and XHTML output."
-repository = "https://github.com/AnswerDotAI/xhtml-md-parser"
-homepage = "https://github.com/AnswerDotAI/xhtml-md-parser"
-documentation = "https://github.com/AnswerDotAI/xhtml-md-parser"
+repository = "https://github.com/AnswerDotAI/xhtmlmd"
+homepage = "https://github.com/AnswerDotAI/xhtmlmd"
+documentation = "https://github.com/AnswerDotAI/xhtmlmd"
 
 [lib]
-name = "xhtml_md_parser"
+name = "xhtmlmd"
 path = "src/lib.rs"
 crate-type = ["cdylib", "rlib"]
 
 [[bin]]
-name = "xhtml-md"
+name = "xhtmlmd"
 path = "src/main.rs"
 
 [profile.release]

@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread;
 use std::time::Duration;
-use xhtml_md_parser::{to_xhtml, MathMode, Options};
+use xhtmlmd::{to_xhtml, MathMode, Options};
 
 const CMARK_GFM_SPEC: &str = include_str!("source/cmark-gfm/spec.txt");
 const CMARK_GFM_EXTENSIONS: &str = include_str!("source/cmark-gfm/extensions.txt");

@@ -1,4 +1,4 @@
-# xhtml-md-parser
+# xhtmlmd
 
 A Rust Markdown parser and XHTML renderer.
 
@@ -27,23 +27,23 @@ Raw HTML is preserved by default. Supported raw HTML container tags such as `div
 
 ## Usage
 
-Install via pip to get both the Python API and the native `xhtml-md` CLI:
+Install via pip to get both the Python API and the native `xhtmlmd` CLI:
 
 ```bash
-pip install xhtml-md-parser
+pip install xhtmlmd
 ```
 
 The CLI reads Markdown from stdin or from an optional file path and writes an XHTML fragment to stdout:
 
 ```bash
-echo '# Hello' | xhtml-md
-xhtml-md --math=brackets input.md > out.xhtml
+echo '# Hello' | xhtmlmd
+xhtmlmd --math=brackets input.md > out.xhtml
 ```
 
 Python API:
 
 ```python
-from xhtml_md_parser import to_xhtml
+from xhtmlmd import to_xhtml
 
 html = to_xhtml("# Hello", math="dollars")
 ```
@@ -58,7 +58,7 @@ cat input.md | cargo run --release -- --math=brackets
 Library usage:
 
 ```rust
-use xhtml_md_parser::{to_xhtml, Options, MathMode};
+use xhtmlmd::{to_xhtml, Options, MathMode};
 
 let mut options = Options::default();
 options.math = MathMode::Dollars;

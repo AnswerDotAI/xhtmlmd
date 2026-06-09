@@ -1,4 +1,4 @@
-use xhtml_md_parser::{to_xhtml, Options};
+use xhtmlmd::{to_xhtml, Options};
 
 #[test]
 fn focused_dialect_fixture() {
@@ -13,15 +13,15 @@ fn focused_dialect_fixture() {
 #[test]
 fn math_modes_are_explicit() {
     let mut opt = Options::default();
-    opt.math = xhtml_md_parser::MathMode::Off;
+    opt.math = xhtmlmd::MathMode::Off;
     let html = to_xhtml("$x$ and \\(y\\)", &opt);
     assert!(!html.contains("class=\"math"));
     assert!(html.contains("$x$ and (y)"));
-    opt.math = xhtml_md_parser::MathMode::Brackets;
+    opt.math = xhtmlmd::MathMode::Brackets;
     let html = to_xhtml("$x$ and \\(y\\)", &opt);
     assert!(html.contains("$x$"));
     assert!(html.contains("<span class=\"math inline\">y</span>"));
-    opt.math = xhtml_md_parser::MathMode::Dollars;
+    opt.math = xhtmlmd::MathMode::Dollars;
     assert!(to_xhtml("$x$", &opt).contains("<span class=\"math inline\">x</span>"));
 }
 

@@ -1,7 +1,7 @@
 use std::env;
 use std::fs;
 use std::io::{self, Read};
-use xhtml_md_parser::{to_xhtml, MathMode, Options};
+use xhtmlmd::{to_xhtml, MathMode, Options};
 
 fn main() {
     let mut options = Options::default();
@@ -35,7 +35,7 @@ fn main() {
 }
 
 fn help() {
-    println!("usage: xhtml-md [--math=off|brackets|dollars] [file.md]\n\nReads Markdown from a file or stdin and writes XHTML fragment output.");
+    println!("usage: xhtmlmd [--math=off|brackets|dollars] [file.md]\n\nReads Markdown from a file or stdin and writes XHTML fragment output.");
 }
 fn die(msg: &str) -> ! {
     eprintln!("{msg}");

@@ -12,7 +12,7 @@
 tools/build.sh
 ```
 
-This builds the Rust CLI and copies `xhtml-md` to `python/xhtml_md_parser.data/scripts/` so maturin includes it in wheels. Pass `release` for an optimized binary:
+This builds the Rust CLI and copies `xhtmlmd` to `python/xhtmlmd.data/scripts/` so maturin includes it in wheels. Pass `release` for an optimized binary:
 
 ```bash
 tools/build.sh release

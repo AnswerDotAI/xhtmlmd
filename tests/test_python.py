@@ -2,7 +2,7 @@ import subprocess
 
 import pytest
 
-from xhtml_md_parser import render, to_xhtml
+from xhtmlmd import render, to_xhtml
 
 
 def test_to_xhtml_renders_markdown():
@@ -22,6 +22,6 @@ def test_invalid_math_mode_raises():
 
 
 def test_cli_reads_markdown_from_stdin():
-    res = subprocess.run(["xhtml-md"], input="# Hello\n", text=True, capture_output=True, check=True)
+    res = subprocess.run(["xhtmlmd"], input="# Hello\n", text=True, capture_output=True, check=True)
     assert res.stdout == "<h1>Hello</h1>\n"
     assert res.stderr == ""
