@@ -257,13 +257,36 @@ it back out.
 <p><code>&lt;details&gt;</code></p>
 ````````````````````````````````
 
+```````````````````````````````` example
+<details markdown="1">
+
+```html
+<details>
+inner
+</details>
+```
+
+</details>
+
+Done.
+.
+<details>
+<pre><code class="language-html">&lt;details&gt;
+inner
+&lt;/details&gt;
+</code></pre>
+</details>
+<p>Done.</p>
+````````````````````````````````
+
 ## Mistletoe raw HTML behavior
 
 These notebook tests keep raw HTML containers open until their closing tag
-across blank lines. That differs from CommonMark/GFM raw HTML block rules,
-which this crate follows for raw HTML without `markdown="1"`.
+across blank lines. This crate follows that balanced-container behavior for
+supported raw HTML container tags, while preserving raw HTML without parsing
+Markdown inside it.
 
-```````````````````````````````` example disabled
+```````````````````````````````` example
 <div>
 
     indented after blank
@@ -274,7 +297,7 @@ indented after blank
 </div>
 ````````````````````````````````
 
-```````````````````````````````` example disabled
+```````````````````````````````` example
 <div>
 
 **not bold**
@@ -285,7 +308,7 @@ indented after blank
 </div>
 ````````````````````````````````
 
-```````````````````````````````` example disabled
+```````````````````````````````` example
 <svg width="10" height="10">
     <circle cx="5" cy="5" r="4"/>
 </svg>
@@ -293,4 +316,40 @@ indented after blank
 <svg width="10" height="10">
 <circle cx="5" cy="5" r="4"/>
 </svg>
+````````````````````````````````
+
+```````````````````````````````` example
+<div>
+<div>inner</div>
+after
+</div>
+.
+<div>
+<div>inner</div>
+after
+</div>
+````````````````````````````````
+
+```````````````````````````````` example
+<div>
+<section>
+</section>
+after
+</div>
+.
+<div>
+<section>
+</section>
+after
+</div>
+````````````````````````````````
+
+```````````````````````````````` example
+<x-panel>
+content
+</x-panel>
+.
+<x-panel>
+content
+</x-panel>
 ````````````````````````````````

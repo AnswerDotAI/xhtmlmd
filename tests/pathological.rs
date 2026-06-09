@@ -30,6 +30,15 @@ fn repeated_image_openers_are_linear_smoke() {
     assert!(elapsed.as_secs() < 5);
 }
 
+#[test]
+fn raw_html_balancing_is_linear_smoke() {
+    let n = 20_000;
+    let input = format!("{}{}", "<div>\n".repeat(n), "</div>\n".repeat(n));
+    let (html, elapsed) = render_with_timeout(input);
+    assert!(html.starts_with("<div>"));
+    assert!(elapsed.as_secs() < 5);
+}
+
 fn render_with_timeout(input: String) -> (String, Duration) {
     let len = input.len();
     let (tx, rx) = mpsc::channel();

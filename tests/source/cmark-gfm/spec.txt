@@ -2078,13 +2078,17 @@ followed by one of the strings (case-insensitive) `address`,
 `tfoot`, `th`, `thead`, `title`, `tr`, `track`, `ul`, followed
 by [whitespace], the end of the line, the string `>`, or
 the string `/>`.\
-**End condition:** line is followed by a [blank line].
+**End condition:** supported raw HTML container tags continue until their
+matching close tag or the end of their enclosing block; other type 6 blocks
+end when the line is followed by a [blank line].
 
 7.  **Start condition:**  line begins with a complete [open tag]
 (with any [tag name] other than `script`,
 `style`, or `pre`) or a complete [closing tag],
 followed only by [whitespace] or the end of the line.\
-**End condition:** line is followed by a [blank line].
+**End condition:** custom elements continue until their matching close tag or
+the end of their enclosing block; other type 7 blocks end when the line is
+followed by a [blank line].
 
 HTML blocks continue until they are closed by their appropriate
 [end condition], or the last line of the document or other [container
@@ -2093,9 +2097,8 @@ block** that might otherwise be recognised as a start condition will
 be ignored by the parser and passed through as-is, without changing
 the parser's state.
 
-For instance, `<pre>` within a HTML block started by `<table>` will not affect
-the parser state; as the HTML block was started in by start condition 6, it
-will end at any blank line. This can be surprising:
+For instance, `<pre>` within a raw HTML block started by `<table>` remains raw
+content of that table block:
 
 ```````````````````````````````` example
 <table><tr><td>
@@ -2109,14 +2112,16 @@ _world_.
 <table><tr><td>
 <pre>
 **Hello**,
-<p><em>world</em>.</p>
+
+_world_.
 </pre>
 </td></tr></table>
 ````````````````````````````````
 
-In this case, the HTML block is terminated by the newline — the `**Hello**`
-text remains verbatim — and regular parsing resumes, with a paragraph,
-emphasised `world` and inline and block HTML following.
+In this crate's dialect, supported raw HTML containers stay open until their
+matching close tag or the end of their enclosing block, so Markdown inside
+those raw containers remains verbatim unless the container uses a supported
+`markdown` control attribute.
 
 All types of [HTML blocks] except type 7 may interrupt
 a paragraph.  Blocks of type 7 may not interrupt a paragraph.
@@ -2180,7 +2185,9 @@ Here we have two HTML blocks with a Markdown paragraph between them:
 </DIV>
 .
 <DIV CLASS="foo">
-<p><em>Markdown</em></p>
+
+*Markdown*
+
 </DIV>
 ````````````````````````````````
 
@@ -2219,7 +2226,8 @@ An open tag need not be closed:
 .
 <div>
 *foo*
-<p><em>bar</em></p>
+
+*bar*
 ````````````````````````````````
 
 
@@ -2278,11 +2286,8 @@ foo
 ````````````````````````````````
 
 
-Everything until the next blank line or end of document
-gets included in the HTML block.  So, in the following
-example, what looks like a Markdown code block
-is actually part of the HTML block, which continues until a blank
-line or the end of the document is reached:
+A supported raw HTML container that opens and closes on the same line is
+complete; following Markdown starts new blocks:
 
 ```````````````````````````````` example
 <div></div>
@@ -2291,9 +2296,8 @@ int x = 33;
 ```
 .
 <div></div>
-``` c
-int x = 33;
-```
+<pre><code class="language-c">int x = 33;
+</code></pre>
 ````````````````````````````````
 
 
@@ -2635,8 +2639,8 @@ The opening tag can be indented 1-3 spaces, but not 4:
     <div>
 .
   <div>
-<pre><code>&lt;div&gt;
-</code></pre>
+
+    <div>
 ````````````````````````````````
 
 
@@ -2656,9 +2660,8 @@ bar
 ````````````````````````````````
 
 
-However, a following blank line is needed, except at the end of
-a document, and except for blocks of types 1--5, [above][HTML
-block]:
+When a supported raw HTML container is explicitly closed, following Markdown
+starts a new block without requiring a separating blank line:
 
 ```````````````````````````````` example
 <div>
@@ -2669,7 +2672,7 @@ bar
 <div>
 bar
 </div>
-*foo*
+<p><em>foo</em></p>
 ````````````````````````````````
 
 
@@ -2705,14 +2708,9 @@ here:
 Most Markdown implementations (including some of Gruber's own) do not
 respect all of these restrictions.
 
-There is one respect, however, in which Gruber's rule is more liberal
-than the one given here, since it allows blank lines to occur inside
-an HTML block.  There are two reasons for disallowing them here.
-First, it removes the need to parse balanced tags, which is
-expensive and can require backtracking from the end of the document
-if no matching end tag is found. Second, it provides a very simple
-and flexible way of including Markdown content inside HTML tags:
-simply separate the Markdown from the HTML using blank lines:
+This crate allows blank lines inside supported raw HTML containers and tracks
+matching tags for those containers. Markdown content inside HTML tags is parsed
+only when the open tag uses a supported `markdown` control attribute:
 
 Compare:
 
@@ -2724,7 +2722,9 @@ Compare:
 </div>
 .
 <div>
-<p><em>Emphasized</em> text.</p>
+
+*Emphasized* text.
+
 </div>
 ````````````````````````````````
 
@@ -2740,16 +2740,7 @@ Compare:
 ````````````````````````````````
 
 
-Some Markdown implementations have adopted a convention of
-interpreting content inside tags as text if the open tag has
-the attribute `markdown=1`.  The rule given above seems a simpler and
-more elegant way of achieving the same expressive power, which is also
-much simpler to parse.
-
-The main potential drawback is that one can no longer paste HTML
-blocks into Markdown documents with 100% reliability.  However,
-*in most cases* this will work fine, because the blank lines in
-HTML are usually followed by HTML block tags.  For example:
+Raw HTML blocks with blank lines are preserved directly:
 
 ```````````````````````````````` example
 <table>
@@ -2774,9 +2765,7 @@ Hi
 ````````````````````````````````
 
 
-There are problems, however, if the inner tags are indented
-*and* separated by spaces, as then they will be interpreted as
-an indented code block:
+Indented inner tags inside a supported raw HTML container are also preserved:
 
 ```````````````````````````````` example
 <table>
@@ -2793,19 +2782,16 @@ an indented code block:
 .
 <table>
   <tr>
-<pre><code>&lt;td&gt;
-  Hi
-&lt;/td&gt;
-</code></pre>
+    <td>
+      Hi
+    </td>
+
   </tr>
 </table>
 ````````````````````````````````
 
 
-Fortunately, blank lines are usually not necessary and can be
-deleted.  The exception is inside `<pre>` tags, but as described
-[above][HTML blocks], raw HTML blocks starting with `<pre>`
-*can* contain blank lines.
+Void and self-closing tags do not open balanced raw HTML containers.
 
 ## Link reference definitions
 

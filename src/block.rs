@@ -1203,10 +1203,13 @@ impl<'a> ContainerBuilder<'a> {
         if self.options.extensions.tagfilter && is_tagfiltered_start(t) {
             return false;
         }
-        let Some(end) = html_block_end(t) else {
+        let Some((end, closed)) = balanced_html_block_start(t).or_else(|| {
+            let end = html_block_end(t)?;
+            let closed = html_block_closed_on_line(&end, line);
+            Some((end, closed))
+        }) else {
             return false;
         };
-        let closed = html_block_closed_on_line(&end, line);
         let mut raw = String::new();
         raw.push_str(line);
         raw.push('\n');
@@ -1218,7 +1221,7 @@ impl<'a> ContainerBuilder<'a> {
         let Some(idx) = self.open_html_block_idx() else {
             return false;
         };
-        let should_close = match &self.nodes[idx].kind {
+        let should_close = match &mut self.nodes[idx].kind {
             BuildKind::HtmlBlock {
                 end: HtmlBlockEnd::BlankLine,
                 ..
@@ -1228,6 +1231,13 @@ impl<'a> ContainerBuilder<'a> {
                 }
                 self.leaf_open = false;
                 return false;
+            }
+            BuildKind::HtmlBlock {
+                end: HtmlBlockEnd::BalancedTag { tag, depth },
+                ..
+            } => {
+                update_html_tag_depth(line, tag, depth);
+                *depth == 0
             }
             BuildKind::HtmlBlock { end, .. } => html_block_closed_on_line(end, line),
             _ => false,
@@ -2212,17 +2222,20 @@ struct OpenTag {
     attrs: Attr,
     markdown: Option<String>,
     end: usize,
+    self_closing: bool,
 }
 
 enum HtmlBlockEnd {
     BlankLine,
     Contains(String),
+    BalancedTag { tag: String, depth: usize },
 }
 
 fn html_block_closed_on_line(end: &HtmlBlockEnd, line: &str) -> bool {
     match end {
         HtmlBlockEnd::BlankLine => false,
         HtmlBlockEnd::Contains(pat) => line.to_ascii_lowercase().contains(pat),
+        HtmlBlockEnd::BalancedTag { .. } => false,
     }
 }
 
@@ -2395,6 +2408,138 @@ fn is_commonmark_block_html_tag(tag: &str) -> bool {
     )
 }
 
+fn balanced_html_block_start(line: &str) -> Option<(HtmlBlockEnd, bool)> {
+    if !line.starts_with('<') {
+        return None;
+    }
+    let open = parse_open_tag(line)?;
+    if open.self_closing
+        || is_void_html_tag(&open.tag)
+        || !is_balanced_html_container_tag(&open.tag)
+    {
+        return None;
+    }
+    let mut depth = 0;
+    update_html_tag_depth(line, &open.tag, &mut depth);
+    Some((
+        HtmlBlockEnd::BalancedTag {
+            tag: open.tag,
+            depth,
+        },
+        depth == 0,
+    ))
+}
+
+fn is_balanced_html_container_tag(tag: &str) -> bool {
+    tag.contains('-')
+        || matches!(
+            tag,
+            "address"
+                | "article"
+                | "aside"
+                | "blockquote"
+                | "body"
+                | "caption"
+                | "colgroup"
+                | "dd"
+                | "details"
+                | "dialog"
+                | "div"
+                | "dl"
+                | "dt"
+                | "fieldset"
+                | "figcaption"
+                | "figure"
+                | "footer"
+                | "form"
+                | "head"
+                | "header"
+                | "html"
+                | "li"
+                | "main"
+                | "math"
+                | "nav"
+                | "ol"
+                | "pre"
+                | "section"
+                | "summary"
+                | "svg"
+                | "table"
+                | "tbody"
+                | "td"
+                | "tfoot"
+                | "th"
+                | "thead"
+                | "tr"
+                | "ul"
+        )
+}
+
+fn is_void_html_tag(tag: &str) -> bool {
+    matches!(
+        tag,
+        "area"
+            | "base"
+            | "br"
+            | "col"
+            | "embed"
+            | "hr"
+            | "img"
+            | "input"
+            | "link"
+            | "meta"
+            | "param"
+            | "source"
+            | "track"
+            | "wbr"
+    )
+}
+
+fn update_html_tag_depth(line: &str, tag: &str, depth: &mut usize) {
+    let mut i = 0;
+    while i < line.len() {
+        let Some(rel) = line[i..].find('<') else {
+            break;
+        };
+        i += rel;
+        let rest = &line[i + 1..];
+        if rest.starts_with("!--") {
+            i += 1 + rest.find("-->").map(|end| end + 3).unwrap_or(rest.len());
+            continue;
+        }
+        if rest.starts_with('!') || rest.starts_with('?') {
+            let Some(close) = find_tag_close(rest) else {
+                break;
+            };
+            i += close + 2;
+            continue;
+        }
+        let closing = rest.starts_with('/');
+        let name_start = if closing { 1 } else { 0 };
+        let Some(name_end) = tag_name_end(&rest[name_start..]) else {
+            i += 1;
+            continue;
+        };
+        let name = &rest[name_start..name_start + name_end];
+        let next = rest[name_start + name_end..].chars().next().unwrap_or('>');
+        if !(next.is_whitespace() || next == '>' || next == '/') {
+            i += 1;
+            continue;
+        }
+        let Some(close) = find_tag_close(rest) else {
+            break;
+        };
+        if name.eq_ignore_ascii_case(tag) {
+            if closing {
+                *depth = depth.saturating_sub(1);
+            } else if !rest[..close].trim_end().ends_with('/') && !is_void_html_tag(tag) {
+                *depth += 1;
+            }
+        }
+        i += close + 2;
+    }
+}
+
 fn parse_open_tag(line: &str) -> Option<OpenTag> {
     let start = line.find('<')?;
     let rest = &line[start + 1..];
@@ -2408,6 +2553,7 @@ fn parse_open_tag(line: &str) -> Option<OpenTag> {
     }
     let tag = rest[..name_end].to_ascii_lowercase();
     let close = find_tag_close(rest)?;
+    let self_closing = rest[..close].trim_end().ends_with('/');
     let raw_attrs = valid_open_tag_attrs(&rest[name_end..close])?;
     let (attrs, markdown) = parse_html_attrs(raw_attrs);
     Some(OpenTag {
@@ -2415,6 +2561,7 @@ fn parse_open_tag(line: &str) -> Option<OpenTag> {
         attrs,
         markdown,
         end: start + close + 2,
+        self_closing,
     })
 }
 
