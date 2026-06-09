@@ -8,6 +8,7 @@ pub mod ast;
 mod attrs;
 mod block;
 mod inline;
+mod line;
 mod render;
 
 pub use ast::{Align, Attr, Block, DefinitionItem, Document, Footnote, Inline, LinkRef, ListItem};

@@ -175,12 +175,14 @@ impl<'a> Renderer<'a> {
                 }
                 out.push_str(" /> ");
             }
-            if tight && item.blocks.len() == 1 {
-                if let Block::Paragraph { children, .. } = &item.blocks[0] {
-                    self.inlines(children, out);
-                } else {
-                    out.push('\n');
-                    self.blocks(&item.blocks, out);
+            if tight {
+                for block in &item.blocks {
+                    if let Block::Paragraph { children, .. } = block {
+                        self.inlines(children, out);
+                    } else {
+                        out.push('\n');
+                        self.block(block, out);
+                    }
                 }
             } else {
                 out.push('\n');
@@ -211,19 +213,23 @@ impl<'a> Renderer<'a> {
             self.inlines(cell, out);
             out.push_str("</th>");
         }
-        out.push_str("</tr>\n</thead>\n<tbody>\n");
-        for row in rows {
-            out.push_str("<tr>");
-            for (i, cell) in row.iter().enumerate() {
-                out.push_str("<td");
-                align_attr(aligns.get(i).copied().unwrap_or_default(), out);
-                out.push('>');
-                self.inlines(cell, out);
-                out.push_str("</td>");
+        out.push_str("</tr>\n</thead>\n");
+        if !rows.is_empty() {
+            out.push_str("<tbody>\n");
+            for row in rows {
+                out.push_str("<tr>");
+                for (i, cell) in row.iter().enumerate() {
+                    out.push_str("<td");
+                    align_attr(aligns.get(i).copied().unwrap_or_default(), out);
+                    out.push('>');
+                    self.inlines(cell, out);
+                    out.push_str("</td>");
+                }
+                out.push_str("</tr>\n");
             }
-            out.push_str("</tr>\n");
+            out.push_str("</tbody>\n");
         }
-        out.push_str("</tbody>\n</table>\n");
+        out.push_str("</table>\n");
     }
 
     fn inlines(&mut self, items: &[Inline], out: &mut String) {
@@ -272,7 +278,7 @@ impl<'a> Renderer<'a> {
                 title,
             } => {
                 out.push_str("<a href=\"");
-                escape_attr(url, out);
+                escape_url_attr(url, out);
                 out.push('"');
                 if let Some(t) = title {
                     out.push_str(" title=\"");
@@ -291,7 +297,7 @@ impl<'a> Renderer<'a> {
                 title,
             } => {
                 out.push_str("<img src=\"");
-                escape_attr(url, out);
+                escape_url_attr(url, out);
                 out.push_str("\" alt=\"");
                 escape_attr(&plain(alt), out);
                 out.push('"');
@@ -305,7 +311,7 @@ impl<'a> Renderer<'a> {
             }
             Inline::Autolink { url, text, .. } => {
                 out.push_str("<a href=\"");
-                escape_attr(url, out);
+                escape_url_attr(url, out);
                 out.push_str("\">");
                 escape_text(text, out);
                 out.push_str("</a>");
@@ -444,6 +450,27 @@ fn escape_text(s: &str, out: &mut String) {
 fn escape_attr(s: &str, out: &mut String) {
     for ch in s.chars() {
         match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            _ => out.push(ch),
+        }
+    }
+}
+
+fn escape_url_attr(s: &str, out: &mut String) {
+    for ch in s.chars() {
+        match ch {
+            ' ' => out.push_str("%20"),
+            '\\' => out.push_str("%5C"),
+            ch if !ch.is_ascii() => {
+                let mut buf = [0u8; 4];
+                for byte in ch.encode_utf8(&mut buf).as_bytes() {
+                    out.push('%');
+                    out.push_str(&format!("{byte:02X}"));
+                }
+            }
             '&' => out.push_str("&amp;"),
             '<' => out.push_str("&lt;"),
             '>' => out.push_str("&gt;"),

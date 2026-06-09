@@ -1,7 +1,10 @@
 use crate::ast::{Attr, Inline, LinkRef};
 use crate::attrs::{normalize_label, parse_braced_attr, parse_span_ial};
 use crate::{MathMode, Options};
+use html_escape::decode_html_entities;
 use std::collections::HashMap;
+
+const ESCAPED_AMP: char = '\u{E000}';
 
 pub struct InlineContext<'a> {
     pub options: &'a Options,
@@ -102,65 +105,78 @@ fn parse_inner(src: &str, ctx: &InlineContext<'_>, depth: usize) -> Vec<Inline> 
         }
         if !no_star && starts(src, i, "**") {
             if let Some(end) = find_unescaped(src, i + 2, "**") {
-                flush(&mut out, &mut text);
-                let children = parse_inner(&src[i + 2..end], ctx, depth + 1);
-                let item = Inline::Strong {
-                    attrs: Attr::default(),
-                    children,
-                };
-                i = push_with_attrs(&mut out, item, src, end + 2, ctx);
-                continue;
+                let body = &src[i + 2..end];
+                if !body.trim().is_empty() {
+                    flush(&mut out, &mut text);
+                    let children = parse_inner(body, ctx, depth + 1);
+                    let item = Inline::Strong {
+                        attrs: Attr::default(),
+                        children,
+                    };
+                    i = push_with_attrs(&mut out, item, src, end + 2, ctx);
+                    continue;
+                }
             } else {
                 no_star = true;
             }
         }
         if !no_under && starts(src, i, "__") {
             if let Some(end) = find_unescaped(src, i + 2, "__") {
-                flush(&mut out, &mut text);
-                let children = parse_inner(&src[i + 2..end], ctx, depth + 1);
-                let item = Inline::Strong {
-                    attrs: Attr::default(),
-                    children,
-                };
-                i = push_with_attrs(&mut out, item, src, end + 2, ctx);
-                continue;
+                let body = &src[i + 2..end];
+                if !body.trim().is_empty() {
+                    flush(&mut out, &mut text);
+                    let children = parse_inner(body, ctx, depth + 1);
+                    let item = Inline::Strong {
+                        attrs: Attr::default(),
+                        children,
+                    };
+                    i = push_with_attrs(&mut out, item, src, end + 2, ctx);
+                    continue;
+                }
             } else {
                 no_under = true;
             }
         }
         if !no_tilde && ctx.options.extensions.strikethrough && starts(src, i, "~~") {
             if let Some(end) = find_unescaped(src, i + 2, "~~") {
-                flush(&mut out, &mut text);
-                let children = parse_inner(&src[i + 2..end], ctx, depth + 1);
-                let item = Inline::Strike {
-                    attrs: Attr::default(),
-                    children,
-                };
-                i = push_with_attrs(&mut out, item, src, end + 2, ctx);
-                continue;
+                let body = &src[i + 2..end];
+                if !body.trim().is_empty() {
+                    flush(&mut out, &mut text);
+                    let children = parse_inner(body, ctx, depth + 1);
+                    let item = Inline::Strike {
+                        attrs: Attr::default(),
+                        children,
+                    };
+                    i = push_with_attrs(&mut out, item, src, end + 2, ctx);
+                    continue;
+                }
             } else {
                 no_tilde = true;
             }
         }
         if !no_star && starts(src, i, "*") {
             if let Some(end) = find_unescaped(src, i + 1, "*") {
-                flush(&mut out, &mut text);
-                let children = parse_inner(&src[i + 1..end], ctx, depth + 1);
-                let item = Inline::Emph {
-                    attrs: Attr::default(),
-                    children,
-                };
-                i = push_with_attrs(&mut out, item, src, end + 1, ctx);
-                continue;
+                let body = &src[i + 1..end];
+                if !body.trim().is_empty() {
+                    flush(&mut out, &mut text);
+                    let children = parse_inner(body, ctx, depth + 1);
+                    let item = Inline::Emph {
+                        attrs: Attr::default(),
+                        children,
+                    };
+                    i = push_with_attrs(&mut out, item, src, end + 1, ctx);
+                    continue;
+                }
             } else {
                 no_star = true;
             }
         }
         if !no_under && starts(src, i, "_") && !is_intraword(src, i) {
             if let Some(end) = find_unescaped(src, i + 1, "_") {
-                if !is_intraword(src, end) {
+                let body = &src[i + 1..end];
+                if !body.trim().is_empty() && !is_intraword(src, end) {
                     flush(&mut out, &mut text);
-                    let children = parse_inner(&src[i + 1..end], ctx, depth + 1);
+                    let children = parse_inner(body, ctx, depth + 1);
                     let item = Inline::Emph {
                         attrs: Attr::default(),
                         children,
@@ -192,7 +208,7 @@ fn parse_inner(src: &str, ctx: &InlineContext<'_>, depth: usize) -> Vec<Inline> 
             if i + 1 < src.len() {
                 let next = next_char(src, i + 1);
                 if is_escapable(next) {
-                    text.push(next);
+                    text.push(if next == '&' { ESCAPED_AMP } else { next });
                     i += 1 + next.len_utf8();
                     continue;
                 }
@@ -337,7 +353,12 @@ fn code_span(src: &str, i: usize) -> Option<(Inline, usize)> {
     let run = count_run(src.as_bytes(), i, b'`');
     let mut j = i + run;
     while j < src.len() {
-        if starts_run(src.as_bytes(), j, b'`', run) {
+        if next_char(src, j) == '`' {
+            let close_run = count_run(src.as_bytes(), j, b'`');
+            if close_run != run {
+                j += close_run;
+                continue;
+            }
             let raw = &src[i + run..j];
             let mut txt = raw.replace('\n', " ").replace('\t', " ");
             if txt.starts_with(' ') && txt.ends_with(' ') && txt.chars().any(|c| c != ' ') {
@@ -463,20 +484,48 @@ fn parse_link_destination_title(s: &str) -> (String, Option<String>) {
     if url.starts_with('<') && url.ends_with('>') && url.len() > 1 {
         url = url[1..url.len() - 1].to_string();
     }
+    url = decode_entities(&unescape_backslash_punctuation(&url));
     let title = if tokens.is_empty() {
         None
     } else {
-        Some(
-            tokens
-                .join(" ")
-                .trim_matches('"')
-                .trim_matches('\'')
-                .trim_matches('(')
-                .trim_matches(')')
-                .to_string(),
-        )
+        let title = tokens
+            .join(" ")
+            .trim_matches('"')
+            .trim_matches('\'')
+            .trim_matches('(')
+            .trim_matches(')')
+            .to_string();
+        Some(decode_entities(&unescape_backslash_punctuation(&title)))
     };
     (url, title.filter(|x| !x.is_empty()))
+}
+
+fn decode_entities(s: &str) -> String {
+    decode_html_entities(s).replace(ESCAPED_AMP, "&")
+}
+
+fn unescape_backslash_punctuation(s: &str) -> String {
+    let mut out = String::new();
+    let mut esc = false;
+    for ch in s.chars() {
+        if esc {
+            if ch.is_ascii_punctuation() {
+                out.push(ch);
+            } else {
+                out.push('\\');
+                out.push(ch);
+            }
+            esc = false;
+        } else if ch == '\\' {
+            esc = true;
+        } else {
+            out.push(ch);
+        }
+    }
+    if esc {
+        out.push('\\');
+    }
+    out
 }
 
 fn split_link_tokens(s: &str) -> Vec<String> {
@@ -638,9 +687,6 @@ fn count_run(bytes: &[u8], mut i: usize, b: u8) -> usize {
     }
     i - start
 }
-fn starts_run(bytes: &[u8], i: usize, b: u8, n: usize) -> bool {
-    i + n <= bytes.len() && bytes[i..i + n].iter().all(|x| *x == b)
-}
 fn valid_footnote_label(s: &str) -> bool {
     !s.is_empty()
         && !s
@@ -669,7 +715,7 @@ fn is_boundary(ch: char) -> bool {
     ch == '\0' || ch.is_whitespace() || "([{:;'\"".contains(ch)
 }
 fn is_escapable(ch: char) -> bool {
-    "\\`*_{ }[]()#+-.!<>$|~:".contains(ch)
+    ch.is_ascii_punctuation()
 }
 fn is_intraword(src: &str, i: usize) -> bool {
     prev_char(src, i).is_alphanumeric()
@@ -678,7 +724,8 @@ fn is_intraword(src: &str, i: usize) -> bool {
 }
 fn flush(out: &mut Vec<Inline>, text: &mut String) {
     if !text.is_empty() {
-        out.push(Inline::Text(std::mem::take(text)));
+        let text = std::mem::take(text);
+        out.push(Inline::Text(decode_entities(&text)));
     }
 }
 

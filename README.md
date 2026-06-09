@@ -1,6 +1,6 @@
 # xhtml-md-parser
 
-A dependency-free Rust Markdown parser and XHTML renderer.
+A Rust Markdown parser and XHTML renderer.
 
 The parser is deliberately tree-oriented: it preserves structure and attributes needed for XHTML output, but it does not aim to round-trip source text. The dialect is CommonMark/GFM for the core and GFM features, with Pandoc-leaning choices where extension families disagree.
 
@@ -18,7 +18,7 @@ The parser is deliberately tree-oriented: it preserves structure and attributes 
 
 ## Parsing strategy
 
-The implementation follows the CommonMark parsing architecture: first determine block structure in a single line-oriented pass, then parse inline content with the completed reference-definition table. Inlines are scanned without regex backtracking. Potentially explosive constructs have explicit bounds: inline nesting, block/container nesting, and link parenthesis nesting.
+The implementation is moving toward the CommonMark parsing architecture: track visual columns and byte offsets for each line, determine block structure with container state, then parse inline content with the completed reference-definition table. Ordinary block quotes and lists already use an arena-backed open-container stack; extension containers are still being moved over. Inlines are scanned without regex backtracking. Potentially explosive constructs have explicit bounds: inline nesting, block/container nesting, and link parenthesis nesting.
 
 The link parser uses bounded parenthesis nesting, bracket scans that consume failed bracketed groups as literal text, and suffix-failure flags for repeated unmatched emphasis delimiters. This is intended to keep adversarial inputs such as deeply nested brackets, long blockquote runs, repeated `![[]()`, and unclosed comments in predictable time.
 
@@ -41,6 +41,11 @@ let html = to_xhtml("# Hello", &options);
 
 ## Tests
 
-The tree includes a focused fixture suite in `tests/fixtures/`, pathological smoke tests in `tests/pathological.rs`, and the uploaded parser-test-source guide copied into `tests/source/markdowntests.md`.
+The tree includes a focused extension fixture in `tests/fixtures/`, pathological smoke tests in `tests/pathological.rs`, and an ignored cmark-gfm conformance report in `tests/conformance.rs`.
 
-The environment used to generate this artifact did not include `rustc` or `cargo`, so the suite is written but was not executed here.
+```bash
+cargo test
+cargo test --test conformance -- --ignored --nocapture
+```
+
+The conformance harness has a per-example timeout and supports `XHTML_MD_CONFORMANCE_SECTION`, `XHTML_MD_CONFORMANCE_EXAMPLE`, `XHTML_MD_CONFORMANCE_LIMIT`, and `XHTML_MD_CONFORMANCE_TRACE` for narrowing failures.

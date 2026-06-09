@@ -1,4 +1,5 @@
 use crate::ast::Attr;
+use html_escape::decode_html_entities;
 use std::collections::HashMap;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -187,16 +188,45 @@ pub fn parse_fence_info(
         .trim()
         .trim_matches('`')
         .to_string();
-    if !lang.is_empty() {
-        attr.push_class(lang.clone());
-    }
+    let lang = decode_info_token(&lang);
     if let Some(rest) = parts.next() {
         if let Some((a, _)) = parse_braced_attr(rest.trim(), defs) {
+            if !lang.is_empty() {
+                attr.push_class(lang.clone());
+            }
             attr.merge(&a);
         }
     }
     let first = if lang.is_empty() { None } else { Some(lang) };
     (info.to_string(), first, attr)
+}
+
+fn decode_info_token(s: &str) -> String {
+    decode_html_entities(&unescape_punctuation(s)).into_owned()
+}
+
+fn unescape_punctuation(s: &str) -> String {
+    let mut out = String::new();
+    let mut esc = false;
+    for ch in s.chars() {
+        if esc {
+            if ch.is_ascii_punctuation() {
+                out.push(ch);
+            } else {
+                out.push('\\');
+                out.push(ch);
+            }
+            esc = false;
+        } else if ch == '\\' {
+            esc = true;
+        } else {
+            out.push(ch);
+        }
+    }
+    if esc {
+        out.push('\\');
+    }
+    out
 }
 
 pub fn normalize_label(s: &str) -> String {
