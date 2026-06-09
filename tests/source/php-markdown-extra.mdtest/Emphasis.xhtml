@@ -1,8 +1,8 @@
 <p>Combined emphasis:</p>
 
 <ol>
-<li><strong><em>test test</em></strong></li>
-<li><strong><em>test test</em></strong></li>
+<li><em><strong>test test</strong></em></li>
+<li><em><strong>test test</strong></em></li>
 <li><em>test <strong>test</strong></em></li>
 <li><strong>test <em>test</em></strong></li>
 <li><strong><em>test</em> test</strong></li>
@@ -36,18 +36,18 @@
 <p>Incorrect nesting:</p>
 
 <ol>
-<li>*test  <strong>test*  test</strong></li>
-<li>_test  <strong>test_  test</strong></li>
-<li><strong>test  *test</strong> test*</li>
-<li><strong>test  _test</strong> test_</li>
-<li><em>test   *test</em>  test*</li>
-<li><em>test   _test</em>  test_</li>
-<li><strong>test **test</strong> test**</li>
-<li><strong>test __test</strong> test__</li>
-<li>_<strong>some text_</strong></li>
-<li>*<strong>some text*</strong></li>
+<li><em>test  <em><em>test</em>  test</em></em></li>
+<li><em>test  <em><em>test</em>  test</em></em></li>
+<li><em><em>test  <em>test</em></em> test</em></li>
+<li><em><em>test  <em>test</em></em> test</em></li>
+<li><em>test   <em>test</em>  test</em></li>
+<li><em>test   <em>test</em>  test</em></li>
+<li><strong>test test test</strong></li>
+<li><strong>test test test</strong></li>
+<li><em>**some text</em>**</li>
+<li><em>__some text</em>__</li>
 <li><strong>_some text</strong>_</li>
-<li>*<strong>some text*</strong></li>
+<li><em>__some text</em>__</li>
 </ol>
 
 <p>No emphasis:</p>
@@ -96,9 +96,9 @@
 Organization: ____<br />
 Region/Country: __</p>
 
-<p>_____Cut here_____</p>
+<p><em><strong>Cut here</strong></em></p>
 
-<p>____Cut here____</p>
+<p><strong>Cut here</strong></p>
 
 
 <h1>Regression</h1>

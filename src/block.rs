@@ -20,6 +20,7 @@ pub fn parse_document(src: &str, options: &Options) -> Document {
         i: 0,
         options: options.clone(),
         link_defs: HashMap::new(),
+        abbr_defs: HashMap::new(),
         attr_defs: HashMap::new(),
         footnotes: Vec::new(),
         warnings: Vec::new(),
@@ -30,10 +31,14 @@ pub fn parse_document(src: &str, options: &Options) -> Document {
         .iter()
         .map(|f| f.label.clone())
         .collect::<HashSet<_>>();
+    let mut abbr_labels = parser.abbr_defs.keys().cloned().collect::<Vec<_>>();
+    abbr_labels.sort_by(|a, b| b.len().cmp(&a.len()).then_with(|| a.cmp(b)));
     let ctx = InlineContext {
         options: &parser.options,
         attr_defs: &parser.attr_defs,
         link_defs: &parser.link_defs,
+        abbr_defs: &parser.abbr_defs,
+        abbr_labels: &abbr_labels,
         footnote_defs: &footnote_defs,
     };
     Document {
@@ -48,6 +53,7 @@ struct Parser {
     i: usize,
     options: Options,
     link_defs: HashMap<String, LinkRef>,
+    abbr_defs: HashMap<String, String>,
     attr_defs: HashMap<String, Attr>,
     footnotes: Vec<DraftFootnote>,
     warnings: Vec<String>,
@@ -324,6 +330,11 @@ impl Parser {
                 self.i = next;
                 continue;
             }
+            if let Some((label, title)) = parse_abbr_def(self.line()) {
+                self.add_abbr_def(label, title);
+                self.i += 1;
+                continue;
+            }
             let mut parsed = self.parse_one(depth);
             if !pending.is_empty() {
                 if let Some(dst) = parsed.first_mut().and_then(DraftBlock::attrs_mut) {
@@ -340,6 +351,10 @@ impl Parser {
         self.link_defs
             .entry(normalize_label(&label))
             .or_insert(link_ref);
+    }
+
+    fn add_abbr_def(&mut self, label: String, title: String) {
+        self.abbr_defs.entry(label).or_insert(title);
     }
 
     fn parse_one(&mut self, depth: usize) -> Vec<DraftBlock> {
@@ -463,8 +478,6 @@ enum BuildKind {
         tag: String,
         attrs: Attr,
         close_tag: String,
-        span: bool,
-        span_text: String,
     },
     FencedCode {
         ch: char,
@@ -844,6 +857,10 @@ impl<'a> ContainerBuilder<'a> {
     }
 
     fn append_leaf(&mut self, line: String, setext: bool) -> bool {
+        self.append_leaf_inner(line, setext, true)
+    }
+
+    fn append_leaf_inner(&mut self, line: String, setext: bool, allow_indented_code: bool) -> bool {
         if self.append_table_row(&line) {
             self.leaf_open = true;
             return false;
@@ -887,7 +904,7 @@ impl<'a> ContainerBuilder<'a> {
         if self.open_html_markdown(&line) {
             return false;
         }
-        if self.open_indented_code(&line) {
+        if allow_indented_code && self.open_indented_code(&line) {
             self.leaf_open = true;
             return false;
         }
@@ -1131,21 +1148,20 @@ impl<'a> ContainerBuilder<'a> {
         let Some(markdown) = open.markdown.clone() else {
             return false;
         };
-        if markdown != "1" && markdown != "block" && markdown != "span" {
+        if markdown != "1" {
             return false;
         }
         let close_tag = format!("</{}>", open.tag);
-        let span = markdown == "span";
         let after_open = line[open.end..].to_string();
         let idx = self.open_node(BuildKind::HtmlMarkdown {
             tag: open.tag,
             attrs: open.attrs,
             close_tag,
-            span,
-            span_text: String::new(),
         });
         self.stack.push(idx);
-        self.feed_html_markdown_inner(idx, &after_open);
+        if !after_open.is_empty() {
+            self.feed_html_markdown_inner(idx, &after_open);
+        }
         true
     }
 
@@ -1158,33 +1174,56 @@ impl<'a> ContainerBuilder<'a> {
     }
 
     fn feed_html_markdown_inner(&mut self, idx: usize, line: &str) {
-        let (close_tag, span) = match &self.nodes[idx].kind {
-            BuildKind::HtmlMarkdown {
-                close_tag, span, ..
-            } => (close_tag.clone(), *span),
+        let close_tag = match &self.nodes[idx].kind {
+            BuildKind::HtmlMarkdown { close_tag, .. } => close_tag.clone(),
             _ => return,
         };
-        let lower = line.to_ascii_lowercase();
-        let (inner, closes) = if let Some(pos) = lower.find(&close_tag) {
+        let (inner, closes) = if let Some(pos) = find_html_markdown_close(line, &close_tag) {
             (&line[..pos], true)
         } else {
             (line, false)
         };
-        if span {
-            if let BuildKind::HtmlMarkdown { span_text, .. } = &mut self.nodes[idx].kind {
-                if !span_text.is_empty() && !inner.is_empty() {
-                    span_text.push('\n');
-                }
-                span_text.push_str(inner);
-            }
-        } else if !inner.trim().is_empty() {
-            self.append_leaf(inner.to_string(), true);
+        if !inner.trim().is_empty() || !closes {
+            self.feed_markdown_inner_line(inner);
         }
         if closes {
             self.truncate_to_stack_node(idx);
             self.stack.pop();
             self.leaf_open = false;
         }
+    }
+
+    fn feed_markdown_inner_line(&mut self, line: &str) {
+        if self.feed_open_fenced_code(line) {
+            self.can_lazy = false;
+            return;
+        }
+        if self.feed_open_math(line) {
+            self.can_lazy = false;
+            return;
+        }
+        if self.feed_open_html_block(line) {
+            self.can_lazy = false;
+            return;
+        }
+        let mut content = line.to_string();
+        if content.trim().is_empty() {
+            self.mark_blank();
+            self.leaf_open = false;
+            self.can_lazy = false;
+            return;
+        }
+        if !self.open_starters(&mut content) {
+            return;
+        }
+        if content.trim().is_empty() {
+            self.leaf_open = false;
+            self.can_lazy = false;
+            return;
+        }
+        self.mark_content();
+        let can_lazy = self.append_leaf_inner(content.clone(), true, false);
+        self.can_lazy = can_lazy && is_lazy_paragraph_continuation(&content);
     }
 
     fn current_html_markdown(&self) -> Option<usize> {
@@ -1741,25 +1780,11 @@ impl<'a> ContainerBuilder<'a> {
                 attrs: attrs.clone(),
                 children: self.finish_children(idx, parser, depth),
             }],
-            BuildKind::HtmlMarkdown {
-                tag,
-                attrs,
-                span,
-                span_text,
-                ..
-            } => {
-                let children = if *span {
-                    vec![DraftBlock::Paragraph {
-                        attrs: Attr::default(),
-                        text: span_text.trim().to_string(),
-                    }]
-                } else {
-                    self.finish_children(idx, parser, depth)
-                };
+            BuildKind::HtmlMarkdown { tag, attrs, .. } => {
                 vec![DraftBlock::HtmlContainer {
                     tag: tag.clone(),
                     attrs: attrs.clone(),
-                    children,
+                    children: self.finish_children(idx, parser, depth),
                 }]
             }
             BuildKind::FencedCode { info, text, .. } => {
@@ -1843,6 +1868,11 @@ impl<'a> ContainerBuilder<'a> {
             if let Some((label, link_ref, next)) = parse_link_ref_at(lines, i, &parser.attr_defs) {
                 parser.add_link_def(label, link_ref);
                 i = next;
+                continue;
+            }
+            if let Some((label, title)) = parse_abbr_def(&lines[i]) {
+                parser.add_abbr_def(label, title);
+                i += 1;
                 continue;
             }
             break;
@@ -2007,6 +2037,22 @@ fn parse_link_ref_attrs(tail: &str, attr_defs: &HashMap<String, Attr>) -> Option
     }
     let (attrs, used) = parse_braced_attr(tail, attr_defs)?;
     tail[used..].trim().is_empty().then_some(attrs)
+}
+
+fn parse_abbr_def(line: &str) -> Option<(String, String)> {
+    if indent(line) > 3 {
+        return None;
+    }
+    let t = line.trim_start();
+    let rest = t.strip_prefix("*[")?;
+    let end = rest.find(']')?;
+    let label = &rest[..end];
+    if label.is_empty() {
+        return None;
+    }
+    let rest = rest[end + 1..].trim_start();
+    let title = rest.strip_prefix(':')?.trim();
+    Some((label.to_string(), title.to_string()))
 }
 
 fn scan_link_ref_label(lines: &[String], i: usize) -> Option<(String, String, usize)> {
@@ -2291,7 +2337,7 @@ fn fence_close(line: &str, ch: char, len: usize) -> bool {
     let t = line.trim_start();
     let b = if ch == '`' { b'`' } else { b'~' };
     let n = t.as_bytes().iter().take_while(|x| **x == b).count();
-    n >= len && t[n..].trim().is_empty()
+    n == len && t[n..].trim().is_empty()
 }
 
 fn fenced_div_start(line: &str, defs: &HashMap<String, Attr>) -> Option<(usize, Attr)> {
@@ -2680,6 +2726,51 @@ fn parse_open_tag(line: &str) -> Option<OpenTag> {
     })
 }
 
+fn find_html_markdown_close(line: &str, close_tag: &str) -> Option<usize> {
+    let close = close_tag.as_bytes();
+    let lower = line.to_ascii_lowercase();
+    let mut i = 0;
+    while i < line.len() {
+        if line.as_bytes()[i] == b'`' {
+            let len = count_byte_run(line.as_bytes(), i, b'`');
+            if let Some(end) = find_backtick_close(line.as_bytes(), i + len, len) {
+                i = end + len;
+            } else {
+                i += len;
+            }
+            continue;
+        }
+        if lower.as_bytes()[i..].starts_with(close) {
+            return Some(i);
+        }
+        i += line[i..].chars().next().unwrap().len_utf8();
+    }
+    None
+}
+
+fn find_backtick_close(bytes: &[u8], mut i: usize, len: usize) -> Option<usize> {
+    while i < bytes.len() {
+        if bytes[i] == b'`' {
+            let n = count_byte_run(bytes, i, b'`');
+            if n == len {
+                return Some(i);
+            }
+            i += n;
+        } else {
+            i += 1;
+        }
+    }
+    None
+}
+
+fn count_byte_run(bytes: &[u8], mut i: usize, b: u8) -> usize {
+    let start = i;
+    while i < bytes.len() && bytes[i] == b {
+        i += 1;
+    }
+    i - start
+}
+
 fn tag_name_end(s: &str) -> Option<usize> {
     let first = s.chars().next()?;
     if !first.is_ascii_alphabetic() {
@@ -3034,6 +3125,7 @@ fn starts_block(line: &str) -> bool {
         || t.starts_with("```")
         || t.starts_with("~~~")
         || t.starts_with(":::")
+        || parse_abbr_def(line).is_some()
         || html_block_interrupts_paragraph(t)
         || thematic_line(line)
 }

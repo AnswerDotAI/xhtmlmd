@@ -9,11 +9,12 @@ The parser is deliberately tree-oriented: it preserves structure and attributes 
 - Core block syntax: paragraphs, ATX/setext headings, thematic breaks, block quotes, ordered/unordered lists, indented code, raw HTML, link reference definitions.
 - GFM: pipe tables with alignment, task lists, strikethrough, angle and bare autolinks, plus opt-in tagfiltering.
 - Code: backtick/tilde fenced code blocks, info strings, and Pandoc-style code attributes.
-- HTML-in-Markdown: `<div markdown="1">`, `markdown="block"`, and `markdown="span"` containers.
+- HTML-in-Markdown: block containers opened with `markdown="1"`; the control attribute is stripped, indented code blocks are disabled inside the container, and fenced code is the code-block syntax there.
 - Math: three modes: `off`, `brackets` for `\(...\)` and `\[...\]`, and `dollars` for those plus `$...$` and `$$...$$` using Pandoc's non-space/digit dollar rules.
 - Attributes and inline spans: Pandoc/kramdown-style `{#id .class key="value"}`, block IALs `{: ...}`, span IALs, ALDs such as `{:note: #id .class}` with references, superscript `^x^`, and highlight `==x==`.
 - Definition lists: PHP Markdown Extra/Pandoc-style `Term` followed by `: definition` or `~ definition`.
 - Footnotes: `[^id]` references to defined `[^id]:` definitions with indented continuation blocks.
+- Abbreviations: `*[HTML]: Hyper Text Markup Language` definitions render matching text as `<abbr>`.
 - Fenced divs: Pandoc/Quarto/Djot-style `:::` containers with attributes or a single class word.
 
 ## Parsing strategy
@@ -22,7 +23,7 @@ The implementation is moving toward the CommonMark parsing architecture: track v
 
 The link parser uses raw reference-label scanning, bounded parenthesis nesting, bounded link labels, URI escaping for rendered href/src attributes, and a plain-text fast path for inputs with no possible inline constructs. This is intended to keep adversarial inputs such as deeply nested brackets, long blockquote runs, repeated `![[]()`, and unclosed comments in predictable time.
 
-Raw HTML is preserved by default. Supported raw HTML container tags such as `div`, `section`, `table`, `svg`, `math`, and custom elements stay open across blank lines until their matching close tag, with same-tag nesting counted; void and self-closing tags do not open balanced containers. Markdown inside raw HTML remains raw unless the open tag uses a supported `markdown` control attribute. `Options::default().tagfilter` is `false`; enabling it applies GFM-style filtering for tags such as `script`, `style`, `xmp`, and `textarea`. This is compatibility and defense-in-depth, not a replacement for sanitizing untrusted rendered HTML.
+Raw HTML is preserved by default. Supported raw HTML container tags such as `div`, `section`, `table`, `svg`, `math`, and custom elements stay open across blank lines until their matching close tag, with same-tag nesting counted; void and self-closing tags do not open balanced containers. Markdown inside raw HTML remains raw unless the open tag that starts the Markdown block uses `markdown="1"`; this crate does not recursively look for markdown controls inside otherwise-raw HTML. `Options::default().tagfilter` is `false`; enabling it applies GFM-style filtering for tags such as `script`, `style`, `xmp`, and `textarea`. This is compatibility and defense-in-depth, not a replacement for sanitizing untrusted rendered HTML.
 
 ## Usage
 

@@ -20,6 +20,13 @@ const PHP_EXTRA_ACTIVE: &[&str] = &[
     "Tables",
     "Link & Image Attributes",
     "Definition Lists",
+    "Backtick Fenced Code Blocks",
+    "Tilde Fenced Code Blocks",
+    "Backtick Fenced Code Blocks Special Cases",
+    "Tilde Fenced Code Blocks Special Cases",
+    "Abbr",
+    "Emphasis",
+    "Footnotes",
 ];
 
 #[test]

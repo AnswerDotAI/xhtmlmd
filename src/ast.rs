@@ -231,6 +231,10 @@ pub enum Inline {
         text: String,
         email: bool,
     },
+    Abbr {
+        text: String,
+        title: String,
+    },
     Html(String),
     Math {
         attrs: Attr,

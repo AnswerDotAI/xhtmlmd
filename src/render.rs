@@ -350,6 +350,13 @@ impl<'a> Renderer<'a> {
                 escape_text(text, out);
                 out.push_str("</a>");
             }
+            Inline::Abbr { text, title } => {
+                out.push_str("<abbr title=\"");
+                escape_attr(title, out);
+                out.push_str("\">");
+                escape_text(text, out);
+                out.push_str("</abbr>");
+            }
             Inline::Html(raw) => out.push_str(raw),
             Inline::Math {
                 attrs,
@@ -411,15 +418,24 @@ impl<'a> Renderer<'a> {
             .iter()
             .map(|f| (f.label.as_str(), f))
             .collect();
+        let mut bodies = Vec::new();
+        let mut idx = 0;
+        while idx < self.footnote_order.len() {
+            let label = self.footnote_order[idx].clone();
+            idx += 1;
+            let mut body = String::new();
+            if let Some(def) = defs.get(label.as_str()) {
+                self.blocks(&def.blocks, &mut body);
+            }
+            bodies.push((label, body));
+        }
         out.push_str("<section class=\"footnotes\" role=\"doc-endnotes\">\n<hr />\n<ol>\n");
-        for label in self.footnote_order.clone() {
+        for (label, body) in bodies {
             let note_id = footnote_id(&label);
             out.push_str("<li id=\"");
             escape_attr(&note_id, out);
             out.push_str("\">\n");
-            if let Some(def) = defs.get(label.as_str()) {
-                self.blocks(&def.blocks, out);
-            }
+            out.push_str(&body);
             let refs = self.footnote_ref_counts.get(&label).copied().unwrap_or(1);
             for idx in 1..=refs {
                 if idx > 1 {
@@ -518,6 +534,7 @@ fn plain(items: &[Inline]) -> String {
             | Inline::Math { tex: text, .. } => out.push_str(text),
             Inline::Image { alt, .. } => out.push_str(&plain(alt)),
             Inline::Autolink { text, .. } => out.push_str(text),
+            Inline::Abbr { text, .. } => out.push_str(text),
             Inline::FootnoteRef { label } => out.push_str(label),
         }
     }

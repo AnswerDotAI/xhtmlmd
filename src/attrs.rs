@@ -214,23 +214,54 @@ pub fn parse_fence_info(
         return (info[..n].trim().to_string(), lang, attr);
     }
     let mut parts = info.splitn(2, char::is_whitespace);
-    let lang = parts
-        .next()
-        .unwrap_or_default()
-        .trim()
-        .trim_matches('`')
-        .to_string();
-    let lang = decode_info_token(&lang);
-    if let Some(rest) = parts.next() {
-        if let Some((a, _)) = parse_braced_attr(rest.trim(), defs) {
-            if !lang.is_empty() {
-                attr.push_class(lang.clone());
+    let token = parts.next().unwrap_or_default().trim().trim_matches('`');
+    let rest = parts.next().unwrap_or_default().trim();
+    if token.starts_with('.') || token.starts_with('#') {
+        let mut dot_attr = Attr::default();
+        let mut dot_rest = rest;
+        if let Some(brace) = token.find('{') {
+            let first = &token[..brace];
+            if !first.is_empty() {
+                if let Some(a) = parse_synthetic_attrs(first, defs) {
+                    dot_attr.merge(&a);
+                }
             }
-            attr.merge(&a);
+            if let Some((a, n)) = parse_braced_attr(&token[brace..], defs) {
+                dot_attr.merge(&a);
+                if !token[brace + n..].trim().is_empty() {
+                    dot_rest = "invalid";
+                }
+            } else {
+                dot_rest = "invalid";
+            }
+        } else if let Some(a) = parse_synthetic_attrs(token, defs) {
+            dot_attr.merge(&a);
+        } else {
+            dot_rest = "invalid";
         }
+        if let Some((a, n)) = parse_braced_attr(dot_rest, defs) {
+            dot_attr.merge(&a);
+            dot_rest = dot_rest[n..].trim();
+        }
+        if dot_rest.is_empty() {
+            let lang = dot_attr.classes.first().cloned();
+            return (info.to_string(), lang, dot_attr);
+        }
+    }
+    let lang = decode_info_token(token);
+    if let Some((a, _)) = parse_braced_attr(rest, defs) {
+        if !lang.is_empty() {
+            attr.push_class(lang.clone());
+        }
+        attr.merge(&a);
     }
     let first = if lang.is_empty() { None } else { Some(lang) };
     (info.to_string(), first, attr)
+}
+
+fn parse_synthetic_attrs(token: &str, defs: &HashMap<String, Attr>) -> Option<Attr> {
+    parse_braced_attr(&format!("{{{token}}}"), defs)
+        .and_then(|(attr, used)| (used == token.len() + 2).then_some(attr))
 }
 
 fn decode_info_token(s: &str) -> String {

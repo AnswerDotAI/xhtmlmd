@@ -13,6 +13,8 @@ pub struct InlineContext<'a> {
     pub options: &'a Options,
     pub attr_defs: &'a HashMap<String, Attr>,
     pub link_defs: &'a HashMap<String, LinkRef>,
+    pub abbr_defs: &'a HashMap<String, String>,
+    pub abbr_labels: &'a [String],
     pub footnote_defs: &'a HashSet<String>,
 }
 
@@ -219,6 +221,9 @@ fn parse_inner(src: &str, ctx: &InlineContext<'_>, depth: usize) -> Vec<Inline> 
 }
 
 fn plain_text_fast_path(src: &str, ctx: &InlineContext<'_>) -> bool {
+    if !ctx.abbr_labels.is_empty() {
+        return false;
+    }
     if src
         .chars()
         .any(|ch| matches!(ch, '\n' | '`' | '\\' | '<' | '*' | '_' | '&'))
@@ -261,7 +266,34 @@ impl InlineScanner<'_, '_> {
     fn flush_text(&mut self) {
         if !self.text.is_empty() {
             let text = std::mem::take(&mut self.text);
-            self.push_inline(Inline::Text(decode_entities(&text)));
+            self.push_text(decode_entities(&text));
+        }
+    }
+
+    fn push_text(&mut self, text: String) {
+        if self.ctx.abbr_labels.is_empty() {
+            self.push_inline(Inline::Text(text));
+            return;
+        }
+        let mut start = 0;
+        let mut i = 0;
+        while i < text.len() {
+            if let Some((label, title)) = matching_abbr(&text, i, self.ctx) {
+                if start < i {
+                    self.push_inline(Inline::Text(text[start..i].to_string()));
+                }
+                self.push_inline(Inline::Abbr {
+                    text: label.to_string(),
+                    title: title.to_string(),
+                });
+                i += label.len();
+                start = i;
+            } else {
+                i += next_char(&text, i).len_utf8();
+            }
+        }
+        if start < text.len() {
+            self.push_inline(Inline::Text(text[start..].to_string()));
         }
     }
 
@@ -480,6 +512,31 @@ impl InlineScanner<'_, '_> {
         }
         next
     }
+}
+
+fn matching_abbr<'a>(
+    text: &str,
+    i: usize,
+    ctx: &'a InlineContext<'_>,
+) -> Option<(&'a str, &'a str)> {
+    for label in ctx.abbr_labels {
+        if text[i..].starts_with(label) && abbr_boundaries(text, i, label.len()) {
+            if let Some(title) = ctx.abbr_defs.get(label.as_str()) {
+                return Some((label.as_str(), title.as_str()));
+            }
+        }
+    }
+    None
+}
+
+fn abbr_boundaries(text: &str, start: usize, len: usize) -> bool {
+    let before = text[..start].chars().next_back();
+    let after = text[start + len..].chars().next();
+    !before.is_some_and(is_abbr_word) && !after.is_some_and(is_abbr_word)
+}
+
+fn is_abbr_word(ch: char) -> bool {
+    ch == '_' || ch.is_alphanumeric()
 }
 
 fn trailing_attr(src: &str, defs: &HashMap<String, Attr>) -> Option<(Attr, usize)> {
@@ -1316,10 +1373,7 @@ fn count_char_run(src: &str, i: usize, ch: char) -> usize {
     src[i..].bytes().take_while(|b| *b == ch as u8).count()
 }
 fn valid_footnote_label(s: &str) -> bool {
-    !s.is_empty()
-        && !s
-            .chars()
-            .any(|c| c.is_whitespace() || c == '^' || c == '[' || c == ']')
+    !s.is_empty() && !s.chars().any(|c| c.is_whitespace() || c == '[' || c == ']')
 }
 
 fn footnote_ref(src: &str, i: usize, ctx: &InlineContext<'_>) -> Option<(String, usize)> {

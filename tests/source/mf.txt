@@ -252,6 +252,42 @@ it back out.
 ````````````````````````````````
 
 ```````````````````````````````` example
+<div markdown="1" class="box">
+    **bold** and *italic*
+
+    Still a paragraph, not indented code.
+</div>
+.
+<div class="box">
+<p><strong>bold</strong> and <em>italic</em></p>
+<p>Still a paragraph, not indented code.</p>
+</div>
+````````````````````````````````
+
+```````````````````````````````` example
+<div markdown="1">
+Code span: `</div>`.
+
+Still inside the div.
+</div>
+.
+<div>
+<p>Code span: <code>&lt;/div&gt;</code>.</p>
+<p>Still inside the div.</p>
+</div>
+````````````````````````````````
+
+```````````````````````````````` example
+<div markdown="span">
+**raw**
+</div>
+.
+<div markdown="span">
+**raw**
+</div>
+````````````````````````````````
+
+```````````````````````````````` example
 `<details>`
 .
 <p><code>&lt;details&gt;</code></p>
