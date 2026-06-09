@@ -1,0 +1,160 @@
+use crate::ast::{Align, Attr, Block, Document, Footnote, Inline, ListItem};
+use std::collections::HashMap;
+
+pub fn to_xhtml_document(doc: &Document) -> String {
+    let mut r = Renderer::new(doc);
+    let mut out = String::new();
+    r.blocks(&doc.blocks, &mut out);
+    r.footnotes(&mut out);
+    out
+}
+
+struct Renderer<'a> {
+    doc: &'a Document,
+    footnote_nums: HashMap<String, usize>,
+    footnote_order: Vec<String>,
+}
+
+impl<'a> Renderer<'a> {
+    fn new(doc: &'a Document) -> Self { Self { doc, footnote_nums: HashMap::new(), footnote_order: Vec::new() } }
+
+    fn blocks(&mut self, blocks: &[Block], out: &mut String) { for block in blocks { self.block(block, out); } }
+
+    fn block(&mut self, block: &Block, out: &mut String) {
+        match block {
+            Block::Paragraph { attrs, children } => { out.push_str("<p"); attrs_html(attrs, out); out.push('>'); self.inlines(children, out); out.push_str("</p>\n"); }
+            Block::Heading { level, attrs, children } => { out.push_str(&format!("<h{level}")); attrs_html(attrs, out); out.push('>'); self.inlines(children, out); out.push_str(&format!("</h{level}>\n")); }
+            Block::BlockQuote { attrs, children } => { out.push_str("<blockquote"); attrs_html(attrs, out); out.push_str(">\n"); self.blocks(children, out); out.push_str("</blockquote>\n"); }
+            Block::List { attrs, ordered, start, tight, items } => self.list(attrs, *ordered, *start, *tight, items, out),
+            Block::DefinitionList { attrs, items } => {
+                out.push_str("<dl"); attrs_html(attrs, out); out.push_str(">\n");
+                for item in items {
+                    out.push_str("<dt>"); self.inlines(&item.term, out); out.push_str("</dt>\n");
+                    for def in &item.definitions { out.push_str("<dd>\n"); self.blocks(def, out); out.push_str("</dd>\n"); }
+                }
+                out.push_str("</dl>\n");
+            }
+            Block::CodeBlock { attrs, lang, text, .. } => {
+                out.push_str("<pre"); attrs_html(attrs, out); out.push_str("><code");
+                if let Some(lang) = lang { out.push_str(" class=\"language-"); escape_attr(lang, out); out.push('"'); }
+                out.push('>'); escape_text(text, out); out.push_str("</code></pre>\n");
+            }
+            Block::Html { raw } => out.push_str(raw),
+            Block::HtmlContainer { tag, attrs, children } => { out.push('<'); out.push_str(tag); attrs_html(attrs, out); out.push_str(">\n"); self.blocks(children, out); out.push_str("</"); out.push_str(tag); out.push_str(">\n"); }
+            Block::ThematicBreak { attrs } => { out.push_str("<hr"); attrs_html(attrs, out); out.push_str(" />\n"); }
+            Block::Table { attrs, aligns, head, rows } => self.table(attrs, aligns, head, rows, out),
+            Block::Div { attrs, children } => { out.push_str("<div"); attrs_html(attrs, out); out.push_str(">\n"); self.blocks(children, out); out.push_str("</div>\n"); }
+            Block::Math { attrs, tex, .. } => { let mut a = attrs.clone(); a.push_class("math"); a.push_class("display"); out.push_str("<div"); attrs_html(&a, out); out.push('>'); escape_text(tex, out); out.push_str("</div>\n"); }
+        }
+    }
+
+    fn list(&mut self, attrs: &Attr, ordered: bool, start: usize, tight: bool, items: &[ListItem], out: &mut String) {
+        let tag = if ordered { "ol" } else { "ul" };
+        out.push('<'); out.push_str(tag); attrs_html(attrs, out);
+        if ordered && start != 1 { out.push_str(" start=\""); out.push_str(&start.to_string()); out.push('"'); }
+        out.push_str(">\n");
+        for item in items {
+            let mut li_attrs = item.attrs.clone();
+            if item.checked.is_some() { li_attrs.push_class("task-list-item"); }
+            out.push_str("<li"); attrs_html(&li_attrs, out); out.push('>');
+            if let Some(checked) = item.checked {
+                out.push_str("<input type=\"checkbox\" disabled=\"disabled\"");
+                if checked { out.push_str(" checked=\"checked\""); }
+                out.push_str(" /> ");
+            }
+            if tight && item.blocks.len() == 1 {
+                if let Block::Paragraph { children, .. } = &item.blocks[0] { self.inlines(children, out); }
+                else { out.push('\n'); self.blocks(&item.blocks, out); }
+            } else { out.push('\n'); self.blocks(&item.blocks, out); }
+            out.push_str("</li>\n");
+        }
+        out.push_str("</"); out.push_str(tag); out.push_str(">\n");
+    }
+
+    fn table(&mut self, attrs: &Attr, aligns: &[Align], head: &[Vec<Inline>], rows: &[Vec<Vec<Inline>>], out: &mut String) {
+        out.push_str("<table"); attrs_html(attrs, out); out.push_str(">\n<thead>\n<tr>");
+        for (i, cell) in head.iter().enumerate() { out.push_str("<th"); align_attr(aligns.get(i).copied().unwrap_or_default(), out); out.push('>'); self.inlines(cell, out); out.push_str("</th>"); }
+        out.push_str("</tr>\n</thead>\n<tbody>\n");
+        for row in rows {
+            out.push_str("<tr>");
+            for (i, cell) in row.iter().enumerate() { out.push_str("<td"); align_attr(aligns.get(i).copied().unwrap_or_default(), out); out.push('>'); self.inlines(cell, out); out.push_str("</td>"); }
+            out.push_str("</tr>\n");
+        }
+        out.push_str("</tbody>\n</table>\n");
+    }
+
+    fn inlines(&mut self, items: &[Inline], out: &mut String) {
+        for item in items { self.inline(item, out); }
+    }
+
+    fn inline(&mut self, item: &Inline, out: &mut String) {
+        match item {
+            Inline::Text(s) => escape_text(s, out),
+            Inline::SoftBreak => out.push('\n'),
+            Inline::HardBreak => out.push_str("<br />\n"),
+            Inline::Emph { attrs, children } => { out.push_str("<em"); attrs_html(attrs, out); out.push('>'); self.inlines(children, out); out.push_str("</em>"); }
+            Inline::Strong { attrs, children } => { out.push_str("<strong"); attrs_html(attrs, out); out.push('>'); self.inlines(children, out); out.push_str("</strong>"); }
+            Inline::Strike { attrs, children } => { out.push_str("<del"); attrs_html(attrs, out); out.push('>'); self.inlines(children, out); out.push_str("</del>"); }
+            Inline::Code { attrs, text } => { out.push_str("<code"); attrs_html(attrs, out); out.push('>'); escape_text(text, out); out.push_str("</code>"); }
+            Inline::Link { attrs, children, url, title } => { out.push_str("<a href=\""); escape_attr(url, out); out.push('"'); if let Some(t) = title { out.push_str(" title=\""); escape_attr(t, out); out.push('"'); } attrs_html(attrs, out); out.push('>'); self.inlines(children, out); out.push_str("</a>"); }
+            Inline::Image { attrs, alt, url, title } => { out.push_str("<img src=\""); escape_attr(url, out); out.push_str("\" alt=\""); escape_attr(&plain(alt), out); out.push('"'); if let Some(t) = title { out.push_str(" title=\""); escape_attr(t, out); out.push('"'); } attrs_html(attrs, out); out.push_str(" />"); }
+            Inline::Autolink { url, text, .. } => { out.push_str("<a href=\""); escape_attr(url, out); out.push_str("\">"); escape_text(text, out); out.push_str("</a>"); }
+            Inline::Html(raw) => out.push_str(raw),
+            Inline::Math { attrs, display, tex } => { let mut a = attrs.clone(); a.push_class("math"); a.push_class(if *display { "display" } else { "inline" }); out.push_str("<span"); attrs_html(&a, out); out.push('>'); escape_text(tex, out); out.push_str("</span>"); }
+            Inline::FootnoteRef { label } => self.footnote_ref(label, out),
+            Inline::Span { attrs, children } => { out.push_str("<span"); attrs_html(attrs, out); out.push('>'); self.inlines(children, out); out.push_str("</span>"); }
+        }
+    }
+
+    fn footnote_ref(&mut self, label: &str, out: &mut String) {
+        let n = if let Some(n) = self.footnote_nums.get(label) { *n } else {
+            let n = self.footnote_order.len() + 1;
+            self.footnote_order.push(label.to_string());
+            self.footnote_nums.insert(label.to_string(), n);
+            n
+        };
+        out.push_str("<sup id=\"fnref-"); escape_attr(label, out); out.push_str("\"><a href=\"#fn-"); escape_attr(label, out); out.push_str("\" class=\"footnote-ref\" role=\"doc-noteref\">"); out.push_str(&n.to_string()); out.push_str("</a></sup>");
+    }
+
+    fn footnotes(&mut self, out: &mut String) {
+        if self.footnote_order.is_empty() { return; }
+        let defs: HashMap<&str, &Footnote> = self.doc.footnotes.iter().map(|f| (f.label.as_str(), f)).collect();
+        out.push_str("<section class=\"footnotes\" role=\"doc-endnotes\">\n<hr />\n<ol>\n");
+        for label in self.footnote_order.clone() {
+            out.push_str("<li id=\"fn-"); escape_attr(&label, out); out.push_str("\">\n");
+            if let Some(def) = defs.get(label.as_str()) { self.blocks(&def.blocks, out); }
+            out.push_str("<a href=\"#fnref-"); escape_attr(&label, out); out.push_str("\" class=\"footnote-backref\" role=\"doc-backlink\">↩</a>\n</li>\n");
+        }
+        out.push_str("</ol>\n</section>\n");
+    }
+}
+
+fn align_attr(a: Align, out: &mut String) { if a != Align::None { out.push_str(" align=\""); out.push_str(&a.to_string()); out.push('"'); } }
+
+pub fn attrs_html(attr: &Attr, out: &mut String) {
+    if let Some(id) = &attr.id { out.push_str(" id=\""); escape_attr(id, out); out.push('"'); }
+    if !attr.classes.is_empty() { out.push_str(" class=\""); escape_attr(&attr.classes.join(" "), out); out.push('"'); }
+    for (k, v) in &attr.pairs {
+        if k == "id" || k == "class" { continue; }
+        out.push(' '); out.push_str(k); out.push_str("=\""); escape_attr(if v.is_empty() { k } else { v }, out); out.push('"');
+    }
+}
+
+fn plain(items: &[Inline]) -> String {
+    let mut out = String::new();
+    for item in items {
+        match item {
+            Inline::Text(s) | Inline::Html(s) => out.push_str(s),
+            Inline::SoftBreak | Inline::HardBreak => out.push(' '),
+            Inline::Emph { children, .. } | Inline::Strong { children, .. } | Inline::Strike { children, .. } | Inline::Span { children, .. } | Inline::Link { children, .. } => out.push_str(&plain(children)),
+            Inline::Code { text, .. } | Inline::Math { tex: text, .. } => out.push_str(text),
+            Inline::Image { alt, .. } => out.push_str(&plain(alt)),
+            Inline::Autolink { text, .. } => out.push_str(text),
+            Inline::FootnoteRef { label } => out.push_str(label),
+        }
+    }
+    out
+}
+
+fn escape_text(s: &str, out: &mut String) { for ch in s.chars() { match ch { '&' => out.push_str("&amp;"), '<' => out.push_str("&lt;"), '>' => out.push_str("&gt;"), _ => out.push(ch) } } }
+fn escape_attr(s: &str, out: &mut String) { for ch in s.chars() { match ch { '&' => out.push_str("&amp;"), '<' => out.push_str("&lt;"), '>' => out.push_str("&gt;"), '"' => out.push_str("&quot;"), _ => out.push(ch) } } }

@@ -1,0 +1,132 @@
+use std::fmt;
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Attr {
+    pub id: Option<String>,
+    pub classes: Vec<String>,
+    pub pairs: Vec<(String, String)>,
+}
+
+impl Attr {
+    pub fn is_empty(&self) -> bool { self.id.is_none() && self.classes.is_empty() && self.pairs.is_empty() }
+    pub fn with_class(class: impl Into<String>) -> Self {
+        let mut a = Self::default();
+        a.push_class(class);
+        a
+    }
+    pub fn push_class(&mut self, class: impl Into<String>) {
+        let class = class.into();
+        if !class.is_empty() && !self.classes.iter().any(|c| c == &class) { self.classes.push(class); }
+    }
+    pub fn set_pair(&mut self, key: impl Into<String>, val: impl Into<String>) {
+        let key = key.into();
+        let val = val.into();
+        if key == "id" { self.id = Some(val); return; }
+        if key == "class" { for c in val.split_whitespace() { self.push_class(c); } return; }
+        if let Some((_, v)) = self.pairs.iter_mut().find(|(k, _)| k == &key) { *v = val; }
+        else { self.pairs.push((key, val)); }
+    }
+    pub fn merge(&mut self, other: &Attr) {
+        if let Some(id) = &other.id { self.id = Some(id.clone()); }
+        for class in &other.classes { self.push_class(class.clone()); }
+        for (k, v) in &other.pairs { self.set_pair(k.clone(), v.clone()); }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Align { None, Left, Center, Right }
+impl Default for Align { fn default() -> Self { Align::None } }
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LinkRef { pub url: String, pub title: Option<String> }
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Document {
+    pub blocks: Vec<Block>,
+    pub footnotes: Vec<Footnote>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Footnote { pub label: String, pub blocks: Vec<Block> }
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ListItem { pub attrs: Attr, pub checked: Option<bool>, pub blocks: Vec<Block> }
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct DefinitionItem { pub term: Vec<Inline>, pub definitions: Vec<Vec<Block>> }
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Block {
+    Paragraph { attrs: Attr, children: Vec<Inline> },
+    Heading { level: u8, attrs: Attr, children: Vec<Inline> },
+    BlockQuote { attrs: Attr, children: Vec<Block> },
+    List { attrs: Attr, ordered: bool, start: usize, tight: bool, items: Vec<ListItem> },
+    DefinitionList { attrs: Attr, items: Vec<DefinitionItem> },
+    CodeBlock { attrs: Attr, info: String, lang: Option<String>, text: String },
+    Html { raw: String },
+    HtmlContainer { tag: String, attrs: Attr, children: Vec<Block> },
+    ThematicBreak { attrs: Attr },
+    Table { attrs: Attr, aligns: Vec<Align>, head: Vec<Vec<Inline>>, rows: Vec<Vec<Vec<Inline>>> },
+    Div { attrs: Attr, children: Vec<Block> },
+    Math { attrs: Attr, display: bool, tex: String },
+}
+
+impl Block {
+    pub fn attrs_mut(&mut self) -> Option<&mut Attr> {
+        match self {
+            Block::Paragraph { attrs, .. }
+            | Block::Heading { attrs, .. }
+            | Block::BlockQuote { attrs, .. }
+            | Block::List { attrs, .. }
+            | Block::DefinitionList { attrs, .. }
+            | Block::CodeBlock { attrs, .. }
+            | Block::HtmlContainer { attrs, .. }
+            | Block::ThematicBreak { attrs, .. }
+            | Block::Table { attrs, .. }
+            | Block::Div { attrs, .. }
+            | Block::Math { attrs, .. } => Some(attrs),
+            Block::Html { .. } => None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Inline {
+    Text(String),
+    SoftBreak,
+    HardBreak,
+    Emph { attrs: Attr, children: Vec<Inline> },
+    Strong { attrs: Attr, children: Vec<Inline> },
+    Strike { attrs: Attr, children: Vec<Inline> },
+    Code { attrs: Attr, text: String },
+    Link { attrs: Attr, children: Vec<Inline>, url: String, title: Option<String> },
+    Image { attrs: Attr, alt: Vec<Inline>, url: String, title: Option<String> },
+    Autolink { url: String, text: String, email: bool },
+    Html(String),
+    Math { attrs: Attr, display: bool, tex: String },
+    FootnoteRef { label: String },
+    Span { attrs: Attr, children: Vec<Inline> },
+}
+
+impl Inline {
+    pub fn attrs_mut(&mut self) -> Option<&mut Attr> {
+        match self {
+            Inline::Emph { attrs, .. }
+            | Inline::Strong { attrs, .. }
+            | Inline::Strike { attrs, .. }
+            | Inline::Code { attrs, .. }
+            | Inline::Link { attrs, .. }
+            | Inline::Image { attrs, .. }
+            | Inline::Math { attrs, .. }
+            | Inline::Span { attrs, .. } => Some(attrs),
+            _ => None,
+        }
+    }
+}
+
+impl fmt::Display for Align {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self { Align::None => "", Align::Left => "left", Align::Center => "center", Align::Right => "right" })
+    }
+}
