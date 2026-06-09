@@ -143,6 +143,10 @@ docs_src/.last_checked
 docs_src/fastai
 tools/fastai
 
+# packaged native scripts
+python/xhtml_md_parser.data/scripts/*
+!python/xhtml_md_parser.data/scripts/.gitkeep
+
 # link checker
 checklink/cookies.txt
 

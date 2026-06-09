@@ -1,0 +1,30 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "xhtml-md-parser"
+version = "0.1.0"
+description = "A bounded-time, Pandoc-leaning Markdown parser with GFM, Extra/kramdown, math, fenced divs, and XHTML output."
+license = {text = "MIT OR Apache-2.0"}
+requires-python = ">=3.10"
+readme = "README.md"
+authors = [{name = "Jeremy Howard", email = "j@fast.ai"}]
+classifiers = [
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: Implementation :: CPython",
+]
+
+[project.urls]
+Homepage = "https://github.com/AnswerDotAI/xhtml-md-parser"
+Repository = "https://github.com/AnswerDotAI/xhtml-md-parser"
+Issues = "https://github.com/AnswerDotAI/xhtml-md-parser/issues"
+
+[tool.maturin]
+features = ["extension-module"]
+python-source = "python"
+module-name = "xhtml_md_parser._native"
+data = "python/xhtml_md_parser.data"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

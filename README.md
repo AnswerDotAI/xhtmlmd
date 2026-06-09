@@ -27,6 +27,29 @@ Raw HTML is preserved by default. Supported raw HTML container tags such as `div
 
 ## Usage
 
+Install via pip to get both the Python API and the native `xhtml-md` CLI:
+
+```bash
+pip install xhtml-md-parser
+```
+
+The CLI reads Markdown from stdin or from an optional file path and writes an XHTML fragment to stdout:
+
+```bash
+echo '# Hello' | xhtml-md
+xhtml-md --math=brackets input.md > out.xhtml
+```
+
+Python API:
+
+```python
+from xhtml_md_parser import to_xhtml
+
+html = to_xhtml("# Hello", math="dollars")
+```
+
+Rust/source usage:
+
 ```bash
 cargo run --release -- --math=dollars input.md > out.xhtml
 cat input.md | cargo run --release -- --math=brackets
@@ -47,8 +70,10 @@ let html = to_xhtml("# Hello", &options);
 The tree includes a focused extension fixture in `tests/fixtures/`, pathological smoke tests in `tests/pathological.rs`, copied cmark-gfm specs, and a notebook-derived spec from `meta/mf.ipynb`.
 
 ```bash
-cargo test
+tools/test.sh
 cargo test --test conformance -- --nocapture
+maturin develop
+pytest tests/test_python.py
 ```
 
 The spec harness has a per-example timeout and supports `XHTML_MD_CONFORMANCE_SECTION`, `XHTML_MD_CONFORMANCE_EXAMPLE`, `XHTML_MD_CONFORMANCE_LIMIT`, and `XHTML_MD_CONFORMANCE_TRACE` for narrowing failures.

@@ -10,6 +10,8 @@ mod block;
 mod entity;
 mod inline;
 mod line;
+#[cfg(feature = "pyo3")]
+mod python;
 mod render;
 mod tagfilter;
 

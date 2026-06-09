@@ -4,11 +4,14 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 description = "A bounded-time, Pandoc-leaning Markdown parser with GFM, Extra/kramdown, math, fenced divs, and XHTML output."
-repository = "https://example.invalid/local-artifact"
+repository = "https://github.com/AnswerDotAI/xhtml-md-parser"
+homepage = "https://github.com/AnswerDotAI/xhtml-md-parser"
+documentation = "https://github.com/AnswerDotAI/xhtml-md-parser"
 
 [lib]
 name = "xhtml_md_parser"
 path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
 
 [[bin]]
 name = "xhtml-md"
@@ -21,7 +24,11 @@ panic = "abort"
 
 [dependencies]
 html-escape = "0.2"
+pyo3 = { version = "0.23", optional = true }
 
 [dev-dependencies]
 ego-tree = "0.11.0"
 scraper = "0.27.0"
+
+[features]
+extension-module = ["pyo3", "pyo3/extension-module"]
