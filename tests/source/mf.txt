@@ -45,16 +45,13 @@ Emoji replacement is not currently part of this crate's dialect.
 <p>😊</p>
 ````````````````````````````````
 
-Notebook subscript uses single tildes, which conflicts with our confirmed
-single-tilde strikethrough behavior.
+## Subscript, superscript, and highlight
 
-```````````````````````````````` example disabled
+```````````````````````````````` example
 H~2~O
 .
 <p>H<sub>2</sub>O</p>
 ````````````````````````````````
-
-## Superscript and highlight
 
 ```````````````````````````````` example
 E=mc^2^

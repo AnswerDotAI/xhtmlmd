@@ -7,5 +7,6 @@ When Markdown extensions disagree, this crate chooses the behavior closest to Pa
 - Attribute syntax is kramdown/Pandoc-compatible: `#id`, `.class`, `key="value"`, ALDs, block IALs, and span IALs. Key/value pairs override earlier keys; classes accumulate.
 - Definition lists follow PHP Markdown Extra/Pandoc: one-line terms with one or more `:` or `~` definitions.
 - Footnotes follow Pandoc/kramdown label rules and render as XHTML endnotes with backlinks.
+- Inline `~~x~~` renders as strikethrough. Inline `~x~` renders as subscript, using the same no-whitespace rule as superscript `^x^`.
 - `<tag markdown="1">` parses block Markdown inside the balanced tag. `markdown="span"` parses inline content into a single paragraph child.
-- Math modes are explicit. `MathMode::Off` treats TeX delimiters as text. `MathMode::Brackets` recognizes only `\(...\)` and `\[...\]`. `MathMode::Dollars` additionally recognizes `$...$` and `$$...$$` with Pandoc's guard against currency-like spans.
+- Math defaults to `MathMode::Brackets`, which recognizes `\(...\)` and `\[...\]`. `MathMode::Dollars` also recognizes `$...$` and `$$...$$` with Pandoc's guard against currency-like spans. `MathMode::On` preserves backslashes before `[]()` so client-side renderers such as KaTeX can see TeX delimiters. `MathMode::Off` treats TeX delimiters as ordinary Markdown text.

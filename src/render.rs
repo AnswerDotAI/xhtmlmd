@@ -291,6 +291,13 @@ impl<'a> Renderer<'a> {
                 escape_text(text, out);
                 out.push_str("</sup>");
             }
+            Inline::Subscript { attrs, text } => {
+                out.push_str("<sub");
+                attrs_html(attrs, out);
+                out.push('>');
+                escape_text(text, out);
+                out.push_str("</sub>");
+            }
             Inline::Highlight { attrs, children } => {
                 out.push_str("<mark");
                 attrs_html(attrs, out);
@@ -531,6 +538,7 @@ fn plain(items: &[Inline]) -> String {
             | Inline::Link { children, .. } => out.push_str(&plain(children)),
             Inline::Code { text, .. }
             | Inline::Superscript { text, .. }
+            | Inline::Subscript { text, .. }
             | Inline::Math { tex: text, .. } => out.push_str(text),
             Inline::Image { alt, .. } => out.push_str(&plain(alt)),
             Inline::Autolink { text, .. } => out.push_str(text),

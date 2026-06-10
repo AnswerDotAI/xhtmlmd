@@ -42,7 +42,9 @@ fn parse_inner(src: &str, ctx: &InlineContext<'_>, depth: usize) -> Vec<Inline> 
     };
     let mut i = 0;
     while i < src.len() {
-        if starts(src, i, "\\[") && ctx.options.math != MathMode::Off {
+        if starts(src, i, "\\[")
+            && matches!(ctx.options.math, MathMode::Brackets | MathMode::Dollars)
+        {
             if let Some(end) = find_unescaped(src, i + 2, "\\]") {
                 scanner.flush_text();
                 let item = Inline::Math {
@@ -54,7 +56,9 @@ fn parse_inner(src: &str, ctx: &InlineContext<'_>, depth: usize) -> Vec<Inline> 
                 continue;
             }
         }
-        if starts(src, i, "\\(") && ctx.options.math != MathMode::Off {
+        if starts(src, i, "\\(")
+            && matches!(ctx.options.math, MathMode::Brackets | MathMode::Dollars)
+        {
             if let Some(end) = find_unescaped(src, i + 2, "\\)") {
                 scanner.flush_text();
                 let item = Inline::Math {
@@ -116,9 +120,20 @@ fn parse_inner(src: &str, ctx: &InlineContext<'_>, depth: usize) -> Vec<Inline> 
             }
         }
         if starts(src, i, "^") {
-            if let Some(end) = superscript_end(src, i + 1) {
+            if let Some(end) = script_end(src, i + 1, '^') {
                 scanner.flush_text();
                 let item = Inline::Superscript {
+                    attrs: Attr::default(),
+                    text: src[i + 1..end].to_string(),
+                };
+                i = scanner.push_with_attrs(item, end + 1);
+                continue;
+            }
+        }
+        if starts(src, i, "~") && !starts(src, i, "~~") && prev_char(src, i) != '~' {
+            if let Some(end) = script_end(src, i + 1, '~') {
+                scanner.flush_text();
+                let item = Inline::Subscript {
                     attrs: Attr::default(),
                     text: src[i + 1..end].to_string(),
                 };
@@ -164,6 +179,11 @@ fn parse_inner(src: &str, ctx: &InlineContext<'_>, depth: usize) -> Vec<Inline> 
         let ch = next_char(src, i);
         if ch == '*' || ch == '_' || ch == '~' {
             let len = count_char_run(src, i, ch);
+            if ch == '~' && len == 1 {
+                scanner.text.push('~');
+                i += 1;
+                continue;
+            }
             scanner.push_delimiter_run(i, ch, len);
             i += len;
             continue;
@@ -186,6 +206,12 @@ fn parse_inner(src: &str, ctx: &InlineContext<'_>, depth: usize) -> Vec<Inline> 
             if i + 1 < src.len() {
                 let next = next_char(src, i + 1);
                 if is_escapable(next) {
+                    if ctx.options.math == MathMode::On && matches!(next, '[' | ']' | '(' | ')') {
+                        scanner.text.push('\\');
+                        scanner.text.push(next);
+                        i += 1 + next.len_utf8();
+                        continue;
+                    }
                     scanner
                         .text
                         .push(if next == '&' { ESCAPED_AMP } else { next });
@@ -1301,7 +1327,7 @@ fn find_closing_dollar(src: &str, mut i: usize) -> Option<usize> {
     None
 }
 
-fn superscript_end(src: &str, mut i: usize) -> Option<usize> {
+fn script_end(src: &str, mut i: usize, marker: char) -> Option<usize> {
     if i >= src.len() {
         return None;
     }
@@ -1320,7 +1346,12 @@ fn superscript_end(src: &str, mut i: usize) -> Option<usize> {
             i += 1;
             continue;
         }
-        if ch == '^' {
+        if ch == marker {
+            if marker == '~' && (prev_char(src, i) == '~' || src[i + 1..].starts_with('~')) {
+                saw = true;
+                i += ch.len_utf8();
+                continue;
+            }
             return saw.then_some(i);
         }
         if ch.is_whitespace() {

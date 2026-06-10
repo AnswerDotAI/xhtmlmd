@@ -7,7 +7,7 @@ use crate::{MathMode, Options};
 #[pyo3(signature = (
     markdown,
     *,
-    math = "dollars",
+    math = "brackets",
     tagfilter = false,
     max_inline_depth = None,
     max_block_depth = None,
@@ -47,10 +47,11 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
 fn parse_math_mode(mode: &str) -> PyResult<MathMode> {
     match mode {
         "off" => Ok(MathMode::Off),
+        "on" => Ok(MathMode::On),
         "brackets" => Ok(MathMode::Brackets),
         "dollars" => Ok(MathMode::Dollars),
         _ => Err(PyValueError::new_err(
-            "math must be 'off', 'brackets', or 'dollars'",
+            "math must be 'off', 'on', 'brackets', or 'dollars'",
         )),
     }
 }

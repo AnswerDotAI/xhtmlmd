@@ -1494,7 +1494,7 @@ impl<'a> ContainerBuilder<'a> {
     }
 
     fn open_math(&mut self, line: &str) -> bool {
-        if self.options.math == MathMode::Off {
+        if !matches!(self.options.math, MathMode::Brackets | MathMode::Dollars) {
             return false;
         }
         let t = line.trim();

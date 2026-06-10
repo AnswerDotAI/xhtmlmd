@@ -21,6 +21,7 @@ pub use render::to_xhtml_document;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MathMode {
     Off,
+    On,
     Brackets,
     Dollars,
 }
@@ -37,7 +38,7 @@ pub struct Options {
 impl Default for Options {
     fn default() -> Self {
         Self {
-            math: MathMode::Dollars,
+            math: MathMode::Brackets,
             tagfilter: false,
             max_inline_depth: 64,
             max_block_depth: 128,

@@ -7,11 +7,11 @@ The parser is deliberately tree-oriented: it preserves structure and attributes 
 ## Implemented syntax
 
 - Core block syntax: paragraphs, ATX/setext headings, thematic breaks, block quotes, ordered/unordered lists, indented code, raw HTML, link reference definitions.
-- GFM: pipe tables with alignment, task lists, strikethrough, angle and bare autolinks, plus opt-in tagfiltering.
+- GFM: pipe tables with alignment, task lists, `~~x~~` strikethrough, angle and bare autolinks, plus opt-in tagfiltering.
 - Code: backtick/tilde fenced code blocks, info strings, and Pandoc-style code attributes.
 - HTML-in-Markdown: block containers opened with `markdown="1"`; the control attribute is stripped, indented code blocks are disabled inside the container, and fenced code is the code-block syntax there.
-- Math: three modes: `off`, `brackets` for `\(...\)` and `\[...\]`, and `dollars` for those plus `$...$` and `$$...$$` using Pandoc's non-space/digit dollar rules.
-- Attributes and inline spans: Pandoc/kramdown-style `{#id .class key="value"}`, block IALs `{: ...}`, span IALs, ALDs such as `{:note: #id .class}` with references, superscript `^x^`, and highlight `==x==`.
+- Math: four modes: `brackets` for `\(...\)` and `\[...\]`, `dollars` for those plus `$...$` and `$$...$$` using Pandoc's non-space/digit dollar rules, `on` to preserve `\(...\)` and `\[...\]` delimiters for client-side renderers such as KaTeX, and `off`. Brackets mode is the default.
+- Attributes and inline spans: Pandoc/kramdown-style `{#id .class key="value"}`, block IALs `{: ...}`, span IALs, ALDs such as `{:note: #id .class}` with references, superscript `^x^`, subscript `~x~`, and highlight `==x==`.
 - Definition lists: PHP Markdown Extra/Pandoc-style `Term` followed by `: definition` or `~ definition`.
 - Footnotes: `[^id]` references to defined `[^id]:` definitions with indented continuation blocks.
 - Abbreviations: `*[HTML]: Hyper Text Markup Language` definitions render matching text as `<abbr>`.
@@ -37,7 +37,9 @@ The CLI reads Markdown from stdin or from an optional file path and writes an XH
 
 ```bash
 echo '# Hello' | xhtmlmd
-xhtmlmd --math=brackets input.md > out.xhtml
+xhtmlmd input.md > out.xhtml
+xhtmlmd --math=on input.md > out.xhtml
+xhtmlmd --math=dollars input.md > out.xhtml
 ```
 
 Python API:
@@ -45,14 +47,16 @@ Python API:
 ```python
 from xhtmlmd import to_xhtml
 
-html = to_xhtml("# Hello", math="dollars")
+html = to_xhtml(r"\(x^2\)")
+html_for_katex = to_xhtml(r"\(x^2\)", math="on")
+html_with_dollars = to_xhtml("$x$", math="dollars")
 ```
 
 Rust/source usage:
 
 ```bash
-cargo run --release -- --math=dollars input.md > out.xhtml
-cat input.md | cargo run --release -- --math=brackets
+cargo run --release -- input.md > out.xhtml
+cat input.md | cargo run --release -- --math=dollars
 ```
 
 Library usage:
@@ -62,7 +66,7 @@ use xhtmlmd::{to_xhtml, Options, MathMode};
 
 let mut options = Options::default();
 options.math = MathMode::Dollars;
-let html = to_xhtml("# Hello", &options);
+let html = to_xhtml("$x$", &options);
 ```
 
 ## Tests

@@ -9,13 +9,13 @@ Each section starts with the Markdown source, then shows the same source rendere
 ### Project notes {#project-notes .section-title}
 
 This paragraph uses *emphasis*, **strong emphasis**, `inline code`,
-~~deleted text~~, ==highlighted text==, and E=mc^2^.
+~~deleted text~~, ==highlighted text==, E=mc^2^, and H~2~O.
 `````
 
 ### Project notes {#project-notes .section-title}
 
 This paragraph uses *emphasis*, **strong emphasis**, `inline code`,
-~~deleted text~~, ==highlighted text==, and E=mc^2^.
+~~deleted text~~, ==highlighted text==, E=mc^2^, and H~2~O.
 
 ## Links, images, and autolinks
 
@@ -75,15 +75,12 @@ Angle links work too: <https://example.com/spec>.
 > - It can also contain lists.
 > - This is useful for callouts and quoted notes.
 
----
 `````
 
 > A block quote can contain normal inline Markdown.
 >
 > - It can also contain lists.
 > - This is useful for callouts and quoted notes.
-
----
 
 ## Tables
 
@@ -178,6 +175,9 @@ xhtmlmd
 brackets math
 : Math mode that recognizes `\(...\)` and `\[...\]`.
 
+on math
+: Math mode that preserves TeX delimiters for client-side renderers.
+
 fenced div
 : A Pandoc-style block container opened with colons.
 `````
@@ -187,6 +187,9 @@ xhtmlmd
 
 brackets math
 : Math mode that recognizes `\(...\)` and `\[...\]`.
+
+on math
+: Math mode that preserves TeX delimiters for client-side renderers.
 
 fenced div
 : A Pandoc-style block container opened with colons.

@@ -1,6 +1,6 @@
 # Title {#top .main}
 
-A paragraph with *em*, **strong**, ~~gone~~, [a link](https://example.com){:rel="nofollow"}, `code`{:.small}, <https://example.org>, footnote[^n], and \(a+b\).
+A paragraph with *em*, **strong**, ~~gone~~, H~2~O, [a link](https://example.com){:rel="nofollow"}, `code`{:.small}, <https://example.org>, footnote[^n], and \(a+b\).
 
 [^n]: Footnote *body*.
 
