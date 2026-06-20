@@ -15,8 +15,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: pip install maturin pytest
-      - run: tools/test.sh
+      - run: pip install fastship maturin pytest
+      - run: ship-rs-test
 
   build:
     needs: test
@@ -31,7 +31,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-      - run: tools/build.sh release
+      - run: pip install fastship
+      - run: ship-rs-prep --release
       - uses: PyO3/maturin-action@v1
         with:
           command: build

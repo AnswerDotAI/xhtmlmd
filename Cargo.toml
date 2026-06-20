@@ -23,12 +23,12 @@ codegen-units = 1
 panic = "abort"
 
 [dependencies]
-html-escape = "0.2"
-pyo3 = { version = "0.23", optional = true }
+html-escape = ">=0.2"
+pyo3 = { version = ">=0.28", optional = true }
 
 [dev-dependencies]
-ego-tree = "0.11.0"
-scraper = "0.27.0"
+ego-tree = ">=0.11.0"
+scraper = ">=0.27.0"
 
 [features]
 extension-module = ["pyo3", "pyo3/extension-module"]

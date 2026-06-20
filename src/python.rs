@@ -52,6 +52,7 @@ fn to_xhtml(
 #[pymodule]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(to_xhtml, m)?)?;
+    m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
 }
 

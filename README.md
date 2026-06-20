@@ -109,9 +109,7 @@ Raw HTML is preserved by default. Supported raw HTML container tags such as `div
 ## Tests
 
 ```bash
-tools/test.sh
-maturin develop
-pytest tests/test_python.py
+ship-rs-test
 ```
 
 Use `cargo test --test conformance -- --nocapture` when you want the per-section conformance report. The harness supports `XHTML_MD_CONFORMANCE_SECTION`, `XHTML_MD_CONFORMANCE_EXAMPLE`, `XHTML_MD_CONFORMANCE_LIMIT`, and `XHTML_MD_CONFORMANCE_TRACE` for narrowing failures.

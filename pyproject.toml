@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "xhtmlmd"
-version = "0.1.0"
+dynamic = ["version"]
 description = "A bounded-time, Pandoc-leaning Markdown parser with GFM, Extra/kramdown, math, fenced divs, and XHTML output."
 license = {text = "MIT OR Apache-2.0"}
 requires-python = ">=3.10"
@@ -31,3 +31,10 @@ data = "python/xhtmlmd.data"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.fastship]
+branch = "main"
+
+[tool.fastship.rs]
+bins = ["xhtmlmd"]
+data_scripts = "python/xhtmlmd.data/scripts"
