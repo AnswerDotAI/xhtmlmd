@@ -9,6 +9,15 @@ pub fn to_xhtml_document(doc: &Document) -> String {
     out
 }
 
+#[allow(dead_code)]
+pub fn to_xhtml_inlines(items: &[Inline]) -> String {
+    let doc = Document::default();
+    let mut r = Renderer::new(&doc);
+    let mut out = String::new();
+    r.inlines(items, &mut out);
+    out
+}
+
 struct Renderer<'a> {
     doc: &'a Document,
     footnote_nums: HashMap<String, usize>,
@@ -92,17 +101,9 @@ impl<'a> Renderer<'a> {
             Block::CodeBlock {
                 attrs, lang, text, ..
             } => {
-                out.push_str("<pre");
-                attrs_html(attrs, out);
-                out.push_str("><code");
-                if let Some(lang) = lang {
-                    out.push_str(" class=\"language-");
-                    escape_attr(lang, out);
-                    out.push('"');
-                }
-                out.push('>');
+                out.push_str(&code_block_open(attrs, lang.as_deref()));
                 escape_text(text, out);
-                out.push_str("</code></pre>\n");
+                out.push_str(CODE_BLOCK_CLOSE);
             }
             Block::Html { raw } => out.push_str(raw),
             Block::HtmlContainer {
@@ -522,6 +523,22 @@ pub fn attrs_html(attr: &Attr, out: &mut String) {
         escape_attr(if v.is_empty() { k } else { v }, out);
         out.push('"');
     }
+}
+
+pub const CODE_BLOCK_CLOSE: &str = "</code></pre>\n";
+
+pub fn code_block_open(attr: &Attr, lang: Option<&str>) -> String {
+    let mut out = String::new();
+    out.push_str("<pre");
+    attrs_html(attr, &mut out);
+    out.push_str("><code");
+    if let Some(lang) = lang {
+        out.push_str(" class=\"language-");
+        escape_attr(lang, &mut out);
+        out.push('"');
+    }
+    out.push('>');
+    out
 }
 
 fn plain(items: &[Inline]) -> String {

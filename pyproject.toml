@@ -20,6 +20,9 @@ Homepage = "https://github.com/AnswerDotAI/xhtmlmd"
 Repository = "https://github.com/AnswerDotAI/xhtmlmd"
 Issues = "https://github.com/AnswerDotAI/xhtmlmd/issues"
 
+[project.optional-dependencies]
+dev = ["fastpylight>=0.1.6", "math-core>=0.6.4"]
+
 [tool.maturin]
 features = ["extension-module"]
 python-source = "python"
