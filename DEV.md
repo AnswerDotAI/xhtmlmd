@@ -5,7 +5,7 @@
 - Rust toolchain
 - Python 3.10+
 - maturin
-- fastship
+- fastship>=0.0.11, installed by `pip install -e '.[dev]'`
 
 ## Building
 
