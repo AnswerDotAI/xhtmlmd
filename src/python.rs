@@ -1,4 +1,6 @@
-use pyo3::exceptions::PyValueError;
+use std::panic::{catch_unwind, AssertUnwindSafe};
+
+use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
@@ -41,12 +43,24 @@ fn to_xhtml(
         options.max_link_paren_depth = depth;
     }
     if let Some(callbacks) = callbacks {
-        let mut doc = crate::parse(markdown, &options);
+        let mut doc = guard("parsing markdown", || crate::parse(markdown, &options))?;
         apply_callbacks(&mut doc, &callbacks)?;
-        Ok(to_xhtml_document(&doc))
+        guard("rendering markdown", || to_xhtml_document(&doc))
     } else {
-        Ok(crate::to_xhtml(markdown, &options))
+        guard("rendering markdown", || crate::to_xhtml(markdown, &options))
     }
+}
+
+/// Run a panic-prone pure-Rust render step, converting any panic into a clean
+/// `RuntimeError` rather than aborting the interpreter or surfacing pyo3's
+/// `BaseException`-derived `PanicException`. The default panic hook still logs
+/// the panic location to stderr, which is what you want when reporting the bug.
+fn guard<T>(what: &str, f: impl FnOnce() -> T) -> PyResult<T> {
+    catch_unwind(AssertUnwindSafe(f)).map_err(|_| {
+        PyRuntimeError::new_err(format!(
+            "internal error in xhtmlmd while {what} (this is a bug, please report it)"
+        ))
+    })
 }
 
 #[pymodule]

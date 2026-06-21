@@ -9,23 +9,21 @@
 
 ## Building
 
-```bash
-ship-rs-build
-```
-
-This builds the Rust CLI and copies `xhtmlmd` to `python/xhtmlmd.data/scripts/` so maturin includes it in wheels.
-
-For local Python development:
+For local development, build and install the extension into your environment:
 
 ```bash
 maturin develop
 ```
 
+`ship-rs-build` builds the distributable wheel. The `xhtmlmd` command is a Python console script (`python/xhtmlmd/__main__.py`) over the `to_xhtml` API; there is no separate Rust binary.
+
 ## Testing
 
 ```bash
-ship-rs-test
+pytest -q
 ```
+
+All tests are Python (`tests/`), run against the built extension; there are no `cargo test` unit tests.
 
 ## Release
 
@@ -36,7 +34,7 @@ Release flow is: release first, then bump.
 1. Confirm tests pass:
 
 ```bash
-ship-rs-test
+pytest -q
 ```
 
 2. Confirm the release version in `Cargo.toml` (`[package].version`). `pyproject.toml` gets the Python package version from Cargo via `dynamic = ["version"]`.

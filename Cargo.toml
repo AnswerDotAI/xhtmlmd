@@ -13,23 +13,13 @@ name = "xhtmlmd"
 path = "src/lib.rs"
 crate-type = ["cdylib", "rlib"]
 
-[[bin]]
-name = "xhtmlmd"
-path = "src/main.rs"
-
 [profile.release]
 lto = true
 codegen-units = 1
-panic = "abort"
 
 [dependencies]
 html-escape = ">=0.2"
-pyo3 = { version = ">=0.28", optional = true }
-
-[dev-dependencies]
-ego-tree = ">=0.11.0"
-scraper = ">=0.27.0"
+pyo3 = ">=0.28"
 
 [features]
-extension-module = ["pyo3", "pyo3/extension-module"]
-pyo3 = ["dep:pyo3"]
+extension-module = ["pyo3/extension-module"]

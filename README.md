@@ -81,21 +81,11 @@ def render_math(node, default_html):
 html = to_xhtml(markdown, callbacks={"math_inline": render_math, "math_block": render_math})
 ```
 
-Rust/source usage:
+Command-line usage (the `xhtmlmd` script is installed with the package):
 
 ```bash
-cargo run --release -- input.md > out.xhtml
-cat input.md | cargo run --release -- --math=dollars
-```
-
-Library usage:
-
-```rust
-use xhtmlmd::{to_xhtml, Options, MathMode};
-
-let mut options = Options::default();
-options.math = MathMode::Dollars;
-let html = to_xhtml("$x$", &options);
+xhtmlmd input.md > out.xhtml
+cat input.md | xhtmlmd --math=dollars
 ```
 
 ## Parsing strategy
@@ -109,7 +99,7 @@ Raw HTML is preserved by default. Supported raw HTML container tags such as `div
 ## Tests
 
 ```bash
-ship-rs-test
+maturin develop && pytest -q
 ```
 
-Use `cargo test --test conformance -- --nocapture` when you want the per-section conformance report. The harness supports `XHTML_MD_CONFORMANCE_SECTION`, `XHTML_MD_CONFORMANCE_EXAMPLE`, `XHTML_MD_CONFORMANCE_LIMIT`, and `XHTML_MD_CONFORMANCE_TRACE` for narrowing failures.
+The spec-conformance suite is `tests/test_conformance.py`: it renders the fixtures under `tests/source/` and compares normalized HTML trees. Run just that file with `pytest tests/test_conformance.py -v` to see per-example ids.

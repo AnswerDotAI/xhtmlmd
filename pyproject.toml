@@ -15,13 +15,16 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: CPython",
 ]
 
+[project.scripts]
+xhtmlmd = "xhtmlmd.__main__:main"
+
 [project.urls]
 Homepage = "https://github.com/AnswerDotAI/xhtmlmd"
 Repository = "https://github.com/AnswerDotAI/xhtmlmd"
 Issues = "https://github.com/AnswerDotAI/xhtmlmd/issues"
 
 [project.optional-dependencies]
-dev = ["fastship>=0.0.14", "maturin>=1.0,<2.0", "pytest", "fastpylight>=0.1.6", "math-core>=0.6.4"]
+dev = ["fastship>=0.0.14", "maturin>=1.0,<2.0", "pytest", "fastpylight>=0.1.6", "math-core>=0.6.4", "beautifulsoup4", "lxml"]
 
 [project.entry-points.fastaudit_safe_native]
 xhtmlmd = "xhtmlmd"
@@ -30,14 +33,9 @@ xhtmlmd = "xhtmlmd"
 features = ["extension-module"]
 python-source = "python"
 module-name = "xhtmlmd._native"
-data = "python/xhtmlmd.data"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
 [tool.fastship]
 branch = "main"
-
-[tool.fastship.rs]
-bins = ["xhtmlmd"]
-data_scripts = "python/xhtmlmd.data/scripts"
