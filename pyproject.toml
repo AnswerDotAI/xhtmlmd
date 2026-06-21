@@ -21,7 +21,7 @@ Repository = "https://github.com/AnswerDotAI/xhtmlmd"
 Issues = "https://github.com/AnswerDotAI/xhtmlmd/issues"
 
 [project.optional-dependencies]
-dev = ["fastship>=0.0.11", "maturin>=1.0,<2.0", "pytest", "fastpylight>=0.1.6", "math-core>=0.6.4"]
+dev = ["fastship>=0.0.14", "maturin>=1.0,<2.0", "pytest", "fastpylight>=0.1.6", "math-core>=0.6.4"]
 
 [tool.maturin]
 features = ["extension-module"]
