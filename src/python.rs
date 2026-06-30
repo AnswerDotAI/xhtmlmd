@@ -4,7 +4,7 @@ use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
-use crate::ast::{Attr, Block, Document, Inline};
+use crate::ast::{Attr, Block, Document, Inline, TableCellContent};
 use crate::render::{code_block_open, to_xhtml_document, to_xhtml_inlines, CODE_BLOCK_CLOSE};
 use crate::{MathMode, Options};
 
@@ -122,13 +122,15 @@ fn transform_block(block: &mut Block, callbacks: &Bound<'_, PyDict>) -> PyResult
                 }
             }
         }
-        Block::Table { head, rows, .. } => {
-            for cell in head {
-                transform_inlines(cell, callbacks)?;
-            }
-            for row in rows {
-                for cell in row {
-                    transform_inlines(cell, callbacks)?;
+        Block::Table {
+            head, rows, foot, ..
+        } => {
+            for row in head.iter_mut().chain(rows).chain(foot) {
+                for cell in &mut row.cells {
+                    match &mut cell.content {
+                        TableCellContent::Inline(items) => transform_inlines(items, callbacks)?,
+                        TableCellContent::Blocks(blocks) => transform_blocks(blocks, callbacks)?,
+                    }
                 }
             }
         }
@@ -323,14 +325,20 @@ fn block_node<'py>(py: Python<'py>, block: &Block) -> PyResult<Bound<'py, PyDict
             aligns,
             head,
             rows,
+            foot,
         } => {
             set_attrs(&d, attrs)?;
             d.set_item(
                 "aligns",
                 aligns.iter().map(ToString::to_string).collect::<Vec<_>>(),
             )?;
-            d.set_item("head_cells", head.len())?;
+            d.set_item(
+                "head_cells",
+                head.iter().map(|row| row.cells.len()).sum::<usize>(),
+            )?;
+            d.set_item("head_rows", head.len())?;
             d.set_item("rows", rows.len())?;
+            d.set_item("foot_rows", foot.len())?;
         }
         Block::Math {
             attrs,

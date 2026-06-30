@@ -8,20 +8,16 @@ from xhtmlmd import to_xhtml
 
 SOURCE = Path(__file__).parent / "source"
 FENCE = "`" * 32
-PHP_EXTRA_ACTIVE = [
-    "Headers with attributes", "Tables", "Link & Image Attributes", "Definition Lists",
-    "Backtick Fenced Code Blocks", "Tilde Fenced Code Blocks",
-    "Backtick Fenced Code Blocks Special Cases", "Tilde Fenced Code Blocks Special Cases",
-    "Abbr", "Emphasis", "Footnotes"]
+PHP_EXTRA_ACTIVE = ("Headers with attributes|Tables|Link & Image Attributes|Definition Lists|Backtick Fenced Code Blocks|"
+    "Tilde Fenced Code Blocks|Backtick Fenced Code Blocks Special Cases|Tilde Fenced Code Blocks Special Cases|"
+    "Abbr|Emphasis|Footnotes").split("|")
 
 BOOL_ATTRS = {"allowfullscreen", "async", "autofocus", "autoplay", "checked", "controls", "default",
     "defer", "disabled", "formnovalidate", "hidden", "ismap", "loop", "multiple", "muted",
     "novalidate", "open", "readonly", "required", "reversed", "selected"}
-BLOCK_TAGS = {"address", "article", "aside", "blockquote", "body", "br", "button", "canvas", "caption",
-    "col", "colgroup", "dd", "details", "div", "dl", "dt", "embed", "fieldset", "figcaption", "figure",
-    "footer", "form", "h1", "h2", "h3", "h4", "h5", "h6", "header", "hgroup", "hr", "iframe", "li", "map",
-    "object", "ol", "output", "p", "pre", "progress", "section", "table", "tbody", "td", "textarea",
-    "tfoot", "th", "thead", "tr", "ul", "video"}
+BLOCK_TAGS = set(("address article aside blockquote body br button canvas caption col colgroup dd details div dl dt embed fieldset "
+    "figcaption figure footer form h1 h2 h3 h4 h5 h6 header hgroup hr iframe li map object ol output p pre progress "
+    "section table tbody td textarea tfoot th thead tr ul video").split())
 
 
 def _split_inclusive_nl(s):
@@ -41,8 +37,7 @@ def parse_cmark_examples(name, src):
     for line in _split_inclusive_nl(src):
         t = line.rstrip("\n").rstrip("\r")
         if state == "text":
-            if t.startswith(f"{FENCE} example"):
-                state, exts, md, html = "md", t[len(f"{FENCE} example"):].split(), "", ""
+            if t.startswith(f"{FENCE} example"): state, exts, md, html = "md", t[len(f"{FENCE} example"):].split(), "", ""
             else:
                 h = _heading_text(t)
                 if h is not None: section = h
@@ -52,8 +47,7 @@ def parse_cmark_examples(name, src):
         elif state == "html":
             if t == FENCE:
                 example += 1
-                if "disabled" not in exts:
-                    out.append((name, example, section, md.replace("→", "\t"), html.replace("→", "\t")))
+                if "disabled" not in exts: out.append((name, example, section, md.replace("→", "\t"), html.replace("→", "\t")))
                 state = "text"
             else: html += line
     return out
@@ -69,12 +63,13 @@ def parse_mdtest_examples(name, rel_dir, active):
     return out
 
 def all_cases():
-    cases = (
-        parse_cmark_examples("spec.txt", (SOURCE/"cmark-gfm"/"spec.txt").read_text())
-        + parse_cmark_examples("extensions.txt", (SOURCE/"cmark-gfm"/"extensions.txt").read_text())
-        + parse_cmark_examples("mf.txt", (SOURCE/"mf.txt").read_text())
-        + parse_cmark_examples("kramdown.txt", (SOURCE/"kramdown.txt").read_text())
-        + parse_mdtest_examples("php-markdown-extra.mdtest", "php-markdown-extra.mdtest", PHP_EXTRA_ACTIVE))
+    cases = []
+    cases += parse_cmark_examples("spec.txt", (SOURCE/"cmark-gfm"/"spec.txt").read_text())
+    cases += parse_cmark_examples("extensions.txt", (SOURCE/"cmark-gfm"/"extensions.txt").read_text())
+    cases += parse_cmark_examples("mf.txt", (SOURCE/"mf.txt").read_text())
+    cases += parse_cmark_examples("kramdown.txt", (SOURCE/"kramdown.txt").read_text())
+    cases += parse_cmark_examples("pandoc-grid-tables.txt", (SOURCE/"pandoc-grid-tables.txt").read_text())
+    cases += parse_mdtest_examples("php-markdown-extra.mdtest", "php-markdown-extra.mdtest", PHP_EXTRA_ACTIVE)
     return cases
 
 
@@ -82,8 +77,12 @@ def _collapse_ws(s):
     out, in_space = [], False
     for ch in s:
         if ch.isspace():
-            if not in_space: out.append(" "); in_space = True
-        else: out.append(ch); in_space = False
+            if not in_space:
+                out.append(" ")
+                in_space = True
+        else:
+            out.append(ch)
+            in_space = False
     return "".join(out)
 
 def _norm_attr_value(name, value):

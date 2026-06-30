@@ -1,4 +1,6 @@
-use crate::ast::{Align, Attr, Block, Document, Footnote, Inline, ListItem};
+use crate::ast::{
+    Align, Attr, Block, Document, Footnote, Inline, ListItem, TableCell, TableCellContent, TableRow,
+};
 use std::collections::HashMap;
 
 pub fn to_xhtml_document(doc: &Document) -> String {
@@ -130,7 +132,8 @@ impl<'a> Renderer<'a> {
                 aligns,
                 head,
                 rows,
-            } => self.table(attrs, aligns, head, rows, out),
+                foot,
+            } => self.table(attrs, aligns, head, rows, foot, out),
             Block::Div { attrs, children } => {
                 out.push_str("<div");
                 attrs_html(attrs, out);
@@ -220,37 +223,88 @@ impl<'a> Renderer<'a> {
         &mut self,
         attrs: &Attr,
         aligns: &[Align],
-        head: &[Vec<Inline>],
-        rows: &[Vec<Vec<Inline>>],
+        head: &[TableRow],
+        rows: &[TableRow],
+        foot: &[TableRow],
         out: &mut String,
     ) {
         out.push_str("<table");
         attrs_html(attrs, out);
-        out.push_str(">\n<thead>\n<tr>");
-        for (i, cell) in head.iter().enumerate() {
-            out.push_str("<th");
-            align_attr(aligns.get(i).copied().unwrap_or_default(), out);
-            out.push('>');
-            self.inlines(cell, out);
-            out.push_str("</th>");
+        out.push_str(">\n");
+        if !head.is_empty() {
+            out.push_str("<thead>\n");
+            for row in head {
+                self.table_row(row, aligns, "th", out);
+            }
+            out.push_str("</thead>\n");
         }
-        out.push_str("</tr>\n</thead>\n");
         if !rows.is_empty() {
             out.push_str("<tbody>\n");
             for row in rows {
-                out.push_str("<tr>");
-                for (i, cell) in row.iter().enumerate() {
-                    out.push_str("<td");
-                    align_attr(aligns.get(i).copied().unwrap_or_default(), out);
-                    out.push('>');
-                    self.inlines(cell, out);
-                    out.push_str("</td>");
-                }
-                out.push_str("</tr>\n");
+                self.table_row(row, aligns, "td", out);
             }
             out.push_str("</tbody>\n");
         }
+        if !foot.is_empty() {
+            out.push_str("<tfoot>\n");
+            for row in foot {
+                self.table_row(row, aligns, "td", out);
+            }
+            out.push_str("</tfoot>\n");
+        }
         out.push_str("</table>\n");
+    }
+
+    fn table_row(&mut self, row: &TableRow, aligns: &[Align], cell_tag: &str, out: &mut String) {
+        out.push_str("<tr");
+        attrs_html(&row.attrs, out);
+        out.push('>');
+        let mut col = 0usize;
+        for cell in &row.cells {
+            self.table_cell(
+                cell,
+                aligns.get(col).copied().unwrap_or_default(),
+                cell_tag,
+                out,
+            );
+            col += cell.colspan.max(1);
+        }
+        out.push_str("</tr>\n");
+    }
+
+    fn table_cell(&mut self, cell: &TableCell, default_align: Align, tag: &str, out: &mut String) {
+        out.push('<');
+        out.push_str(tag);
+        attrs_html(&cell.attrs, out);
+        let align = if cell.align == Align::None {
+            default_align
+        } else {
+            cell.align
+        };
+        align_attr(align, out);
+        if cell.rowspan > 1 {
+            out.push_str(" rowspan=\"");
+            out.push_str(&cell.rowspan.to_string());
+            out.push('"');
+        }
+        if cell.colspan > 1 {
+            out.push_str(" colspan=\"");
+            out.push_str(&cell.colspan.to_string());
+            out.push('"');
+        }
+        out.push('>');
+        match &cell.content {
+            TableCellContent::Inline(items) => self.inlines(items, out),
+            TableCellContent::Blocks(blocks) => {
+                if !blocks.is_empty() {
+                    out.push('\n');
+                    self.blocks(blocks, out);
+                }
+            }
+        }
+        out.push_str("</");
+        out.push_str(tag);
+        out.push('>');
     }
 
     fn inlines(&mut self, items: &[Inline], out: &mut String) {

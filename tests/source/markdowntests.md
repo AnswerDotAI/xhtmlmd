@@ -95,6 +95,7 @@ This is the feature the user explicitly flagged, and it has three canonical home
 |---|---|
 | **GFM tables** | cmark-gfm `test/spec.txt`/`extensions.txt`; markdown-it `test/fixtures/markdown-it/tables.txt` |
 | **PHP Extra / MMD / kramdown tables** | php-markdown `PHP Markdown Extra.mdtest/Tables.text`; MMD-Test-Suite; kramdown `block/14_table/` |
+| **Pandoc grid tables** | [Pandoc](https://github.com/jgm/pandoc) `MANUAL.txt`, `test/markdown-reader-more.txt`, and `test/command/grid-table-indented.md` |
 | **Raw HTML + `markdown="1"`** | php-markdown "Inline HTML with Markdown content"; Python-Markdown md_in_html tests; kramdown `block/09_html/parse_block_html` |
 | **Footnotes** | php-markdown `Footnotes`; kramdown (footnote cases); Python-Markdown footnotes tests |
 | **Definition lists** | php-markdown `Definition Lists`; kramdown `block/13_definition_list/` |

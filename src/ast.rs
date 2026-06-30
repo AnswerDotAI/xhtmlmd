@@ -107,6 +107,27 @@ pub struct Definition {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct TableRow {
+    pub attrs: Attr,
+    pub cells: Vec<TableCell>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct TableCell {
+    pub attrs: Attr,
+    pub align: Align,
+    pub rowspan: usize,
+    pub colspan: usize,
+    pub content: TableCellContent,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum TableCellContent {
+    Inline(Vec<Inline>),
+    Blocks(Vec<Block>),
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub enum Block {
     Paragraph {
         attrs: Attr,
@@ -152,8 +173,9 @@ pub enum Block {
     Table {
         attrs: Attr,
         aligns: Vec<Align>,
-        head: Vec<Vec<Inline>>,
-        rows: Vec<Vec<Vec<Inline>>>,
+        head: Vec<TableRow>,
+        rows: Vec<TableRow>,
+        foot: Vec<TableRow>,
     },
     Div {
         attrs: Attr,

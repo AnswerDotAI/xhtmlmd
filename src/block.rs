@@ -1,5 +1,6 @@
 use crate::ast::{
     Align, Attr, Block, Definition, DefinitionItem, Document, Footnote, LinkRef, ListItem,
+    TableCell, TableCellContent, TableRow,
 };
 use crate::attrs::{
     normalize_label, parse_attr_line, parse_braced_attr, parse_fence_info, parse_html_attrs,
@@ -11,6 +12,7 @@ use crate::line::Line;
 use crate::tagfilter::{is_tagfiltered_start, tagfilter_html};
 use crate::{MathMode, Options};
 use std::collections::{HashMap, HashSet};
+use unicode_width::UnicodeWidthChar;
 
 pub fn parse_document(src: &str, options: &Options) -> Document {
     let src = src.replace("\r\n", "\n").replace('\r', "\n");
@@ -64,22 +66,64 @@ struct DraftFootnote {
     blocks: Vec<DraftBlock>,
 }
 
+#[derive(Clone)]
 struct DraftListItem {
     attrs: Attr,
     checked: Option<bool>,
     blocks: Vec<DraftBlock>,
 }
 
+#[derive(Clone)]
 struct DraftDefinitionItem {
     terms: Vec<String>,
     definitions: Vec<DraftDefinition>,
 }
 
+#[derive(Clone)]
 struct DraftDefinition {
     tight: bool,
     blocks: Vec<DraftBlock>,
 }
 
+#[derive(Clone)]
+struct DraftTableRow {
+    attrs: Attr,
+    cells: Vec<DraftTableCell>,
+}
+
+#[derive(Clone)]
+struct DraftTableCell {
+    attrs: Attr,
+    align: Align,
+    rowspan: usize,
+    colspan: usize,
+    content: DraftTableCellContent,
+}
+
+#[derive(Clone)]
+enum DraftTableCellContent {
+    Inline(String),
+    Blocks(Vec<DraftBlock>),
+}
+
+fn draft_inline_table_row(cells: Vec<String>, aligns: &[Align]) -> DraftTableRow {
+    DraftTableRow {
+        attrs: Attr::default(),
+        cells: cells
+            .into_iter()
+            .enumerate()
+            .map(|(i, content)| DraftTableCell {
+                attrs: Attr::default(),
+                align: aligns.get(i).copied().unwrap_or_default(),
+                rowspan: 1,
+                colspan: 1,
+                content: DraftTableCellContent::Inline(content),
+            })
+            .collect(),
+    }
+}
+
+#[derive(Clone)]
 enum DraftBlock {
     Paragraph {
         attrs: Attr,
@@ -125,8 +169,9 @@ enum DraftBlock {
     Table {
         attrs: Attr,
         aligns: Vec<Align>,
-        head: Vec<String>,
-        rows: Vec<Vec<String>>,
+        head: Vec<DraftTableRow>,
+        rows: Vec<DraftTableRow>,
+        foot: Vec<DraftTableRow>,
     },
     Div {
         attrs: Attr,
@@ -258,21 +303,13 @@ fn finalize_block(block: DraftBlock, ctx: &InlineContext<'_>) -> Block {
             aligns,
             head,
             rows,
+            foot,
         } => Block::Table {
             attrs,
             aligns,
-            head: head
-                .into_iter()
-                .map(|cell| parse_inlines(&cell, ctx))
-                .collect(),
-            rows: rows
-                .into_iter()
-                .map(|row| {
-                    row.into_iter()
-                        .map(|cell| parse_inlines(&cell, ctx))
-                        .collect()
-                })
-                .collect(),
+            head: finalize_table_rows(head, ctx),
+            rows: finalize_table_rows(rows, ctx),
+            foot: finalize_table_rows(foot, ctx),
         },
         DraftBlock::Div { attrs, children } => Block::Div {
             attrs,
@@ -288,6 +325,32 @@ fn finalize_block(block: DraftBlock, ctx: &InlineContext<'_>) -> Block {
             tex,
         },
     }
+}
+
+fn finalize_table_rows(rows: Vec<DraftTableRow>, ctx: &InlineContext<'_>) -> Vec<TableRow> {
+    rows.into_iter()
+        .map(|row| TableRow {
+            attrs: row.attrs,
+            cells: row
+                .cells
+                .into_iter()
+                .map(|cell| TableCell {
+                    attrs: cell.attrs,
+                    align: cell.align,
+                    rowspan: cell.rowspan,
+                    colspan: cell.colspan,
+                    content: match cell.content {
+                        DraftTableCellContent::Inline(text) => {
+                            TableCellContent::Inline(parse_inlines(&text, ctx))
+                        }
+                        DraftTableCellContent::Blocks(blocks) => {
+                            TableCellContent::Blocks(finalize_blocks(blocks, ctx))
+                        }
+                    },
+                })
+                .collect(),
+        })
+        .collect()
 }
 
 impl Parser {
@@ -361,6 +424,32 @@ impl Parser {
         self.container_block(depth)
     }
 
+    fn parse_nested_blocks(&mut self, src: &str, depth: usize) -> Vec<DraftBlock> {
+        let mut nested = Parser {
+            lines: src.lines().map(|s| s.to_string()).collect(),
+            i: 0,
+            options: self.options.clone(),
+            link_defs: self.link_defs.clone(),
+            abbr_defs: self.abbr_defs.clone(),
+            attr_defs: self.attr_defs.clone(),
+            footnotes: Vec::new(),
+            warnings: Vec::new(),
+        };
+        let blocks = nested.parse_blocks(depth + 1);
+        for (k, v) in nested.link_defs {
+            self.link_defs.entry(k).or_insert(v);
+        }
+        for (k, v) in nested.abbr_defs {
+            self.abbr_defs.entry(k).or_insert(v);
+        }
+        for (k, v) in nested.attr_defs {
+            self.attr_defs.entry(k).or_insert(v);
+        }
+        self.footnotes.extend(nested.footnotes);
+        self.warnings.extend(nested.warnings);
+        blocks
+    }
+
     fn line(&self) -> &str {
         &self.lines[self.i]
     }
@@ -371,11 +460,12 @@ impl Parser {
         let mut builder = ContainerBuilder::new(&attr_defs, &options);
         while self.i < self.lines.len() {
             let line = self.line();
+            let next_line = self.lines.get(self.i + 1).map(String::as_str);
             let next_nonblank = self.lines[self.i + 1..]
                 .iter()
                 .find(|line| !line.trim().is_empty())
                 .map(String::as_str);
-            if !builder.feed_line(line, next_nonblank) {
+            if !builder.feed_line(line, next_line, next_nonblank) {
                 break;
             }
             self.i += 1;
@@ -515,9 +605,14 @@ enum BuildKind {
     Table {
         attrs: Attr,
         aligns: Vec<Align>,
-        head: Vec<String>,
-        rows: Vec<Vec<String>>,
+        head: Vec<DraftTableRow>,
+        rows: Vec<DraftTableRow>,
+        foot: Vec<DraftTableRow>,
         trim_leading_body_pipe: bool,
+    },
+    GridTable {
+        lines: Vec<String>,
+        closed: bool,
     },
 }
 
@@ -538,7 +633,12 @@ impl<'a> ContainerBuilder<'a> {
         }
     }
 
-    fn feed_line(&mut self, line: &str, next_nonblank: Option<&str>) -> bool {
+    fn feed_line(
+        &mut self,
+        line: &str,
+        next_line: Option<&str>,
+        next_nonblank: Option<&str>,
+    ) -> bool {
         let mut content = line.to_string();
         self.consumed_closer = false;
         let lazy = self.match_containers(&mut content);
@@ -551,6 +651,10 @@ impl<'a> ContainerBuilder<'a> {
             return true;
         }
         if self.feed_open_math(&content) {
+            self.can_lazy = false;
+            return true;
+        }
+        if self.feed_open_grid_table(&content, next_line) {
             self.can_lazy = false;
             return true;
         }
@@ -697,6 +801,7 @@ impl<'a> ContainerBuilder<'a> {
                 BuildKind::Root
                 | BuildKind::FencedCode { .. }
                 | BuildKind::Math { .. }
+                | BuildKind::GridTable { .. }
                 | BuildKind::Paragraph { .. }
                 | BuildKind::Heading { .. }
                 | BuildKind::ThematicBreak { .. }
@@ -885,6 +990,10 @@ impl<'a> ContainerBuilder<'a> {
             self.leaf_open = true;
             return true;
         }
+        if self.open_grid_table(&line) {
+            self.leaf_open = true;
+            return false;
+        }
         if self.open_fenced_code(&line) {
             self.leaf_open = true;
             return false;
@@ -1008,9 +1117,10 @@ impl<'a> ContainerBuilder<'a> {
             .collect();
         let table = BuildKind::Table {
             attrs: Attr::default(),
+            head: vec![draft_inline_table_row(head, &aligns)],
             aligns,
-            head,
             rows: Vec::new(),
+            foot: Vec::new(),
             trim_leading_body_pipe: header_line.trim_start().starts_with('|'),
         };
         if paragraph_len == 1 {
@@ -1045,12 +1155,13 @@ impl<'a> ContainerBuilder<'a> {
         }
         let mut row = split_table_body_row(line, *trim_leading_body_pipe);
         row.resize(aligns.len(), String::new());
-        rows.push(
+        rows.push(draft_inline_table_row(
             row.into_iter()
                 .take(aligns.len())
                 .map(|cell| cell.trim().to_string())
                 .collect(),
-        );
+            aligns,
+        ));
         true
     }
 
@@ -1407,6 +1518,7 @@ impl<'a> ContainerBuilder<'a> {
                 BuildKind::Root
                 | BuildKind::FencedCode { .. }
                 | BuildKind::Math { .. }
+                | BuildKind::GridTable { .. }
                 | BuildKind::Paragraph { .. }
                 | BuildKind::Heading { .. }
                 | BuildKind::ThematicBreak { .. }
@@ -1434,6 +1546,7 @@ impl<'a> ContainerBuilder<'a> {
                         | BuildKind::HtmlBlock { closed: false, .. }
                         | BuildKind::FencedCode { closed: false, .. }
                         | BuildKind::Math { closed: false, .. }
+                        | BuildKind::GridTable { closed: false, .. }
                 )
             });
     }
@@ -1538,6 +1651,47 @@ impl<'a> ContainerBuilder<'a> {
     fn open_math_idx(&self) -> Option<usize> {
         let idx = self.last_child()?;
         matches!(self.nodes[idx].kind, BuildKind::Math { closed: false, .. }).then_some(idx)
+    }
+
+    fn open_grid_table(&mut self, line: &str) -> bool {
+        let Some(line) = normalize_grid_line(line) else {
+            return false;
+        };
+        if !is_grid_border_line(&line) {
+            return false;
+        }
+        self.open_node(BuildKind::GridTable {
+            lines: vec![line],
+            closed: false,
+        });
+        true
+    }
+
+    fn feed_open_grid_table(&mut self, line: &str, next_line: Option<&str>) -> bool {
+        let Some(idx) = self.open_grid_table_idx() else {
+            return false;
+        };
+        let line = normalize_grid_line(line).unwrap_or_else(|| line.to_string());
+        let closes = is_grid_border_line(&line)
+            && match next_line.and_then(normalize_grid_line) {
+                Some(next) => !next.starts_with('|') && !is_grid_border_line(&next),
+                None => true,
+            };
+        if let BuildKind::GridTable { lines, closed } = &mut self.nodes[idx].kind {
+            lines.push(line);
+            *closed = closes;
+        }
+        self.leaf_open = !closes;
+        true
+    }
+
+    fn open_grid_table_idx(&self) -> Option<usize> {
+        let idx = self.last_child()?;
+        matches!(
+            self.nodes[idx].kind,
+            BuildKind::GridTable { closed: false, .. }
+        )
+        .then_some(idx)
     }
 
     fn mark_blank(&mut self) {
@@ -1693,6 +1847,7 @@ impl<'a> ContainerBuilder<'a> {
                 BuildKind::Root
                 | BuildKind::FencedCode { .. }
                 | BuildKind::Math { .. }
+                | BuildKind::GridTable { .. }
                 | BuildKind::Paragraph { .. }
                 | BuildKind::Heading { .. }
                 | BuildKind::ThematicBreak { .. }
@@ -1823,17 +1978,27 @@ impl<'a> ContainerBuilder<'a> {
                     raw.clone()
                 },
             }],
+            BuildKind::GridTable { lines, .. } => parse_grid_table(lines, parser, depth)
+                .map(|table| vec![table])
+                .unwrap_or_else(|| {
+                    vec![DraftBlock::Paragraph {
+                        attrs: Attr::default(),
+                        text: lines.join("\n"),
+                    }]
+                }),
             BuildKind::Table {
                 attrs,
                 aligns,
                 head,
                 rows,
+                foot,
                 ..
             } => vec![DraftBlock::Table {
                 attrs: attrs.clone(),
                 aligns: aligns.clone(),
                 head: head.clone(),
                 rows: rows.clone(),
+                foot: foot.clone(),
             }],
         }
     }
@@ -3015,6 +3180,405 @@ fn def_marker(line: &str) -> Option<String> {
     } else {
         None
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GridRule {
+    Dash,
+    Equal,
+}
+
+struct Dsu {
+    parent: Vec<usize>,
+}
+
+impl Dsu {
+    fn new(n: usize) -> Self {
+        Self {
+            parent: (0..n).collect(),
+        }
+    }
+    fn find(&mut self, x: usize) -> usize {
+        let p = self.parent[x];
+        if p == x {
+            x
+        } else {
+            let root = self.find(p);
+            self.parent[x] = root;
+            root
+        }
+    }
+    fn union(&mut self, a: usize, b: usize) {
+        let ra = self.find(a);
+        let rb = self.find(b);
+        if ra != rb {
+            self.parent[rb] = ra;
+        }
+    }
+}
+
+fn normalize_grid_line(line: &str) -> Option<String> {
+    if line.trim().is_empty() {
+        return Some(String::new());
+    }
+    let ind = indent(line);
+    (ind <= 3).then(|| strip_indent(line, ind).trim_end().to_string())
+}
+
+fn is_grid_border_line(line: &str) -> bool {
+    let t = line.trim_end();
+    if !t.starts_with('+') || !t.ends_with('+') {
+        return false;
+    }
+    let mut segments = 0;
+    for seg in t.split('+').filter(|seg| !seg.is_empty()) {
+        let body = seg.trim().trim_matches(':');
+        if body.is_empty() || !body.chars().all(|ch| ch == '-' || ch == '=') {
+            return false;
+        }
+        segments += 1;
+    }
+    segments > 0
+}
+
+fn parse_grid_table(lines: &[String], parser: &mut Parser, depth: usize) -> Option<DraftBlock> {
+    if lines.len() < 3 {
+        return None;
+    }
+    let xs = grid_columns(lines)?;
+    let cols = xs.len().checked_sub(1)?;
+    if cols == 0 {
+        return None;
+    }
+    let rules = grid_rules(lines, &xs);
+    let sep_idxs = rules
+        .iter()
+        .enumerate()
+        .filter_map(|(i, row)| row.iter().any(Option::is_some).then_some(i))
+        .collect::<Vec<_>>();
+    if sep_idxs.len() < 2 || sep_idxs.first().copied() != Some(0) {
+        return None;
+    }
+    let row_count = sep_idxs.len() - 1;
+    let mut dsu = Dsu::new(row_count * cols);
+    for row in 0..row_count {
+        for col in 0..cols.saturating_sub(1) {
+            if !grid_vertical_boundary(lines, &sep_idxs, &xs, row, col + 1) {
+                dsu.union(row * cols + col, row * cols + col + 1);
+            }
+        }
+    }
+    for row in 0..row_count.saturating_sub(1) {
+        let sep = sep_idxs[row + 1];
+        for col in 0..cols {
+            if rules[sep][col].is_none() {
+                dsu.union(row * cols + col, (row + 1) * cols + col);
+            }
+        }
+    }
+
+    let mut regions: HashMap<usize, (usize, usize, usize, usize)> = HashMap::new();
+    for row in 0..row_count {
+        for col in 0..cols {
+            let root = dsu.find(row * cols + col);
+            regions
+                .entry(root)
+                .and_modify(|(r0, r1, c0, c1)| {
+                    *r0 = (*r0).min(row);
+                    *r1 = (*r1).max(row);
+                    *c0 = (*c0).min(col);
+                    *c1 = (*c1).max(col);
+                })
+                .or_insert((row, row, col, col));
+        }
+    }
+    for &(r0, r1, c0, c1) in regions.values() {
+        let root = dsu.find(r0 * cols + c0);
+        for row in r0..=r1 {
+            for col in c0..=c1 {
+                if dsu.find(row * cols + col) != root {
+                    return None;
+                }
+            }
+        }
+    }
+
+    let full_eq = sep_idxs
+        .iter()
+        .enumerate()
+        .filter_map(|(event, line)| {
+            rules[*line]
+                .iter()
+                .all(|rule| *rule == Some(GridRule::Equal))
+                .then_some(event)
+        })
+        .collect::<Vec<_>>();
+    let last_event = sep_idxs.len() - 1;
+    let foot_start = if full_eq.last().copied() == Some(last_event) {
+        full_eq
+            .iter()
+            .rev()
+            .copied()
+            .find(|event| *event < last_event)
+    } else {
+        None
+    };
+    let body_end = foot_start.unwrap_or(last_event);
+    let head_sep = full_eq
+        .iter()
+        .copied()
+        .find(|event| *event > 0 && *event < body_end);
+    let body_start = head_sep.unwrap_or(0);
+    let align_event = head_sep.unwrap_or(0);
+    let aligns = (0..cols)
+        .map(|col| grid_align_at(&lines[sep_idxs[align_event]], xs[col], xs[col + 1]))
+        .collect::<Vec<_>>();
+
+    let mut entries = regions
+        .into_values()
+        .map(|(r0, r1, c0, c1)| {
+            let cell_lines = grid_cell_lines(lines, &rules, &sep_idxs, &xs, r0, r1, c0, c1);
+            let content = grid_cell_content(cell_lines, parser, depth);
+            (
+                r0,
+                c0,
+                DraftTableCell {
+                    attrs: Attr::default(),
+                    align: aligns.get(c0).copied().unwrap_or_default(),
+                    rowspan: r1 - r0 + 1,
+                    colspan: c1 - c0 + 1,
+                    content,
+                },
+            )
+        })
+        .collect::<Vec<_>>();
+    entries.sort_by_key(|(row, col, _)| (*row, *col));
+
+    let mut head = Vec::new();
+    let mut rows = Vec::new();
+    let mut foot = Vec::new();
+    for row_idx in 0..row_count {
+        let cells = entries
+            .iter()
+            .filter(|(row, _, _)| *row == row_idx)
+            .map(|(_, _, cell)| cell.clone())
+            .collect::<Vec<_>>();
+        let row = DraftTableRow {
+            attrs: Attr::default(),
+            cells,
+        };
+        if head_sep.is_some_and(|sep| row_idx < sep) {
+            head.push(row);
+        } else if foot_start.is_some_and(|start| row_idx >= start) {
+            foot.push(row);
+        } else if row_idx >= body_start && row_idx < body_end {
+            rows.push(row);
+        }
+    }
+    Some(DraftBlock::Table {
+        attrs: Attr::default(),
+        aligns,
+        head,
+        rows,
+        foot,
+    })
+}
+
+fn grid_columns(lines: &[String]) -> Option<Vec<usize>> {
+    let mut xs = Vec::new();
+    for line in lines {
+        for (col, ch) in display_positions(line) {
+            if ch == '+' || ch == '|' {
+                xs.push(col);
+            }
+        }
+    }
+    xs.sort_unstable();
+    xs.dedup();
+    (xs.len() >= 2).then_some(xs)
+}
+
+fn grid_rules(lines: &[String], xs: &[usize]) -> Vec<Vec<Option<GridRule>>> {
+    let cols = xs.len().saturating_sub(1);
+    lines
+        .iter()
+        .map(|line| {
+            (0..cols)
+                .map(|col| grid_rule_at(line, xs[col], xs[col + 1]))
+                .collect()
+        })
+        .collect()
+}
+
+fn grid_rule_at(line: &str, start: usize, end: usize) -> Option<GridRule> {
+    if end <= start + 1 {
+        return None;
+    }
+    let left = display_char_at(line, start)?;
+    let right = display_char_at(line, end)?;
+    if !matches!(left, '+' | '-' | '=' | ':') || !matches!(right, '+' | '-' | '=' | ':') {
+        return None;
+    }
+    let mut kind = None;
+    for (col, ch) in display_positions(line) {
+        if col <= start || col >= end {
+            continue;
+        }
+        match ch {
+            '-' => {
+                if kind.is_none() {
+                    kind = Some(GridRule::Dash);
+                }
+            }
+            '=' => kind = Some(GridRule::Equal),
+            ':' => continue,
+            _ => return None,
+        }
+    }
+    kind
+}
+
+fn grid_align_at(line: &str, start: usize, end: usize) -> Align {
+    let chars = display_positions(line)
+        .into_iter()
+        .filter_map(|(col, ch)| (col > start && col < end).then_some(ch))
+        .collect::<Vec<_>>();
+    let left = chars.first().copied() == Some(':');
+    let right = chars.last().copied() == Some(':');
+    match (left, right) {
+        (true, true) => Align::Center,
+        (true, false) => Align::Left,
+        (false, true) => Align::Right,
+        _ => Align::None,
+    }
+}
+
+fn grid_vertical_boundary(
+    lines: &[String],
+    sep_idxs: &[usize],
+    xs: &[usize],
+    row: usize,
+    boundary: usize,
+) -> bool {
+    let x = xs[boundary];
+    let top = sep_idxs[row];
+    let bottom = sep_idxs[row + 1];
+    (top + 1..bottom).any(|line| display_char_at(&lines[line], x) == Some('|'))
+}
+
+fn grid_cell_lines(
+    lines: &[String],
+    rules: &[Vec<Option<GridRule>>],
+    sep_idxs: &[usize],
+    xs: &[usize],
+    r0: usize,
+    r1: usize,
+    c0: usize,
+    c1: usize,
+) -> Vec<String> {
+    let x0 = xs[c0];
+    let x1 = xs[c1 + 1];
+    let y0 = sep_idxs[r0];
+    let y1 = sep_idxs[r1 + 1];
+    let mut out = Vec::new();
+    for y in y0 + 1..y1 {
+        if (c0..=c1).all(|col| rules[y][col].is_some()) {
+            continue;
+        }
+        out.push(display_slice(&lines[y], x0 + 1, x1).trim_end().to_string());
+    }
+    normalize_grid_cell_lines(out)
+}
+
+fn normalize_grid_cell_lines(mut lines: Vec<String>) -> Vec<String> {
+    while lines.first().is_some_and(|line| line.trim().is_empty()) {
+        lines.remove(0);
+    }
+    while lines.last().is_some_and(|line| line.trim().is_empty()) {
+        lines.pop();
+    }
+    if lines
+        .iter()
+        .filter(|line| !line.is_empty())
+        .all(|line| line.starts_with(' '))
+    {
+        for line in &mut lines {
+            if line.starts_with(' ') {
+                line.remove(0);
+            }
+        }
+    }
+    lines
+}
+
+fn grid_cell_content(
+    lines: Vec<String>,
+    parser: &mut Parser,
+    depth: usize,
+) -> DraftTableCellContent {
+    if lines.is_empty() {
+        return DraftTableCellContent::Inline(String::new());
+    }
+    if grid_cell_needs_blocks(&lines) {
+        DraftTableCellContent::Blocks(parser.parse_nested_blocks(&lines.join("\n"), depth + 1))
+    } else {
+        DraftTableCellContent::Inline(
+            lines
+                .into_iter()
+                .map(|line| line.trim().to_string())
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+    }
+}
+
+fn grid_cell_needs_blocks(lines: &[String]) -> bool {
+    let mut saw_content = false;
+    let mut saw_blank_after_content = false;
+    for line in lines {
+        if line.trim().is_empty() {
+            saw_blank_after_content |= saw_content;
+            continue;
+        }
+        if saw_blank_after_content {
+            return true;
+        }
+        saw_content = true;
+        if indent(line) > 3
+            || starts_block(line)
+            || list_marker(line).is_some()
+            || def_marker(line).is_some()
+        {
+            return true;
+        }
+    }
+    false
+}
+
+fn display_positions(line: &str) -> Vec<(usize, char)> {
+    let mut out = Vec::new();
+    let mut col = 0;
+    for ch in line.chars() {
+        out.push((col, ch));
+        col = match ch {
+            '\t' => col + 4 - (col % 4),
+            _ => col + ch.width().unwrap_or(0),
+        };
+    }
+    out
+}
+
+fn display_char_at(line: &str, target: usize) -> Option<char> {
+    display_positions(line)
+        .into_iter()
+        .find_map(|(col, ch)| (col == target).then_some(ch))
+}
+
+fn display_slice(line: &str, start: usize, end: usize) -> String {
+    display_positions(line)
+        .into_iter()
+        .filter_map(|(col, ch)| (col >= start && col < end).then_some(ch))
+        .collect()
 }
 
 fn split_table_row(line: &str) -> Option<Vec<String>> {

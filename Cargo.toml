@@ -20,6 +20,7 @@ codegen-units = 1
 [dependencies]
 html-escape = ">=0.2"
 pyo3 = ">=0.28"
+unicode-width = "0.2"
 
 [features]
 extension-module = ["pyo3/extension-module"]

@@ -14,7 +14,10 @@ mod python;
 mod render;
 mod tagfilter;
 
-pub use ast::{Align, Attr, Block, DefinitionItem, Document, Footnote, Inline, LinkRef, ListItem};
+pub use ast::{
+    Align, Attr, Block, DefinitionItem, Document, Footnote, Inline, LinkRef, ListItem, TableCell,
+    TableCellContent, TableRow,
+};
 pub use render::to_xhtml_document;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
