@@ -16,7 +16,7 @@ mod tagfilter;
 
 pub use ast::{
     Align, Attr, Block, DefinitionItem, Document, Footnote, Inline, LinkRef, ListItem, TableCell,
-    TableCellContent, TableRow,
+    TableCellContent, TableCellData, TableRow, TableRowData,
 };
 pub use render::to_xhtml_document;
 

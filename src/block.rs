@@ -1,6 +1,6 @@
 use crate::ast::{
     Align, Attr, Block, Definition, DefinitionItem, Document, Footnote, LinkRef, ListItem,
-    TableCell, TableCellContent, TableRow,
+    TableCellContent, TableCellData, TableRow, TableRowData,
 };
 use crate::attrs::{
     normalize_label, parse_attr_line, parse_braced_attr, parse_fence_info, parse_html_attrs,
@@ -85,20 +85,8 @@ struct DraftDefinition {
     blocks: Vec<DraftBlock>,
 }
 
-#[derive(Clone)]
-struct DraftTableRow {
-    attrs: Attr,
-    cells: Vec<DraftTableCell>,
-}
-
-#[derive(Clone)]
-struct DraftTableCell {
-    attrs: Attr,
-    align: Align,
-    rowspan: usize,
-    colspan: usize,
-    content: DraftTableCellContent,
-}
+type DraftTableRow = TableRowData<DraftTableCellContent>;
+type DraftTableCell = TableCellData<DraftTableCellContent>;
 
 #[derive(Clone)]
 enum DraftTableCellContent {
@@ -334,7 +322,7 @@ fn finalize_table_rows(rows: Vec<DraftTableRow>, ctx: &InlineContext<'_>) -> Vec
             cells: row
                 .cells
                 .into_iter()
-                .map(|cell| TableCell {
+                .map(|cell| TableCellData {
                     attrs: cell.attrs,
                     align: cell.align,
                     rowspan: cell.rowspan,

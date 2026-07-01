@@ -106,19 +106,22 @@ pub struct Definition {
     pub blocks: Vec<Block>,
 }
 
+pub type TableRow = TableRowData<TableCellContent>;
+pub type TableCell = TableCellData<TableCellContent>;
+
 #[derive(Clone, Debug, PartialEq)]
-pub struct TableRow {
+pub struct TableRowData<C> {
     pub attrs: Attr,
-    pub cells: Vec<TableCell>,
+    pub cells: Vec<TableCellData<C>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct TableCell {
+pub struct TableCellData<C> {
     pub attrs: Attr,
     pub align: Align,
     pub rowspan: usize,
     pub colspan: usize,
-    pub content: TableCellContent,
+    pub content: C,
 }
 
 #[derive(Clone, Debug, PartialEq)]
