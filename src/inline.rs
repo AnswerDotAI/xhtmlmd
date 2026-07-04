@@ -40,12 +40,13 @@ fn parse_inner(src: &str, ctx: &InlineContext<'_>, depth: usize) -> Vec<Inline> 
         brackets: &mut brackets,
         text: String::new(),
     };
+    let mut failed = FailedScans::default();
     let mut i = 0;
     while i < src.len() {
         if starts(src, i, "\\[")
             && matches!(ctx.options.math, MathMode::Brackets | MathMode::Dollars)
         {
-            if let Some(end) = find_unescaped(src, i + 2, "\\]") {
+            if let Some(end) = memo_find_unescaped(&mut failed.bracket, src, i + 2, "\\]") {
                 scanner.flush_text();
                 let item = Inline::Math {
                     attrs: Attr::default(),
@@ -59,7 +60,7 @@ fn parse_inner(src: &str, ctx: &InlineContext<'_>, depth: usize) -> Vec<Inline> 
         if starts(src, i, "\\(")
             && matches!(ctx.options.math, MathMode::Brackets | MathMode::Dollars)
         {
-            if let Some(end) = find_unescaped(src, i + 2, "\\)") {
+            if let Some(end) = memo_find_unescaped(&mut failed.paren, src, i + 2, "\\)") {
                 scanner.flush_text();
                 let item = Inline::Math {
                     attrs: Attr::default(),
@@ -71,7 +72,7 @@ fn parse_inner(src: &str, ctx: &InlineContext<'_>, depth: usize) -> Vec<Inline> 
             }
         }
         if ctx.options.math == MathMode::Dollars && starts(src, i, "$$") {
-            if let Some(end) = find_unescaped(src, i + 2, "$$") {
+            if let Some(end) = memo_find_unescaped(&mut failed.dollars, src, i + 2, "$$") {
                 scanner.flush_text();
                 let item = Inline::Math {
                     attrs: Attr::default(),
@@ -83,7 +84,9 @@ fn parse_inner(src: &str, ctx: &InlineContext<'_>, depth: usize) -> Vec<Inline> 
             }
         }
         if ctx.options.math == MathMode::Dollars && starts(src, i, "$") && can_open_dollar(src, i) {
-            if let Some(end) = find_closing_dollar(src, i + 1) {
+            if let Some(end) = memo_find(&mut failed.dollar, i + 1, |from| {
+                find_closing_dollar(src, from)
+            }) {
                 scanner.flush_text();
                 let item = Inline::Math {
                     attrs: Attr::default(),
@@ -440,8 +443,9 @@ impl InlineScanner<'_, '_> {
         if after >= self.src.len() || !starts(self.src, after, "(") {
             return None;
         }
-        let (inside, next) = paren_content(self.src, after + 1)?;
-        let (url, title) = parse_link_destination_title(inside)?;
+        let max_parens = self.ctx.options.max_link_paren_depth;
+        let (inside, next) = paren_content(self.src, after + 1, max_parens)?;
+        let (url, title) = parse_link_destination_title(inside, max_parens)?;
         Some((
             if image {
                 Inline::Image {
@@ -618,6 +622,10 @@ fn process_delimiters_range(
     start_node: usize,
     end_node: usize,
 ) {
+    // cmark's openers_bottom: when no opener matches a closer, remember how far
+    // the search went per (char, can_open, len % 3) so later closers of the same
+    // kind never rescan below it. Keeps runs of unmatched closers linear.
+    let mut openers_bottom = [[[0usize; 3]; 2]; 3];
     let mut closer = 0;
     while closer < delimiters.len() {
         if !delimiters[closer].active
@@ -629,7 +637,10 @@ fn process_delimiters_range(
             closer += 1;
             continue;
         }
-        let Some(opener) = find_opener(delimiters, closer, start_node) else {
+        let bottom = &mut openers_bottom[delimiter_char_index(delimiters[closer].ch)]
+            [delimiters[closer].can_open as usize][delimiters[closer].len % 3];
+        let Some(opener) = find_opener(delimiters, closer, start_node, *bottom) else {
+            *bottom = closer;
             closer += 1;
             continue;
         };
@@ -647,10 +658,23 @@ fn process_delimiters_range(
     }
 }
 
-fn find_opener(delimiters: &[Delimiter], closer: usize, start_node: usize) -> Option<usize> {
+fn delimiter_char_index(ch: char) -> usize {
+    match ch {
+        '*' => 0,
+        '_' => 1,
+        _ => 2,
+    }
+}
+
+fn find_opener(
+    delimiters: &[Delimiter],
+    closer: usize,
+    start_node: usize,
+    bottom: usize,
+) -> Option<usize> {
     let ch = delimiters[closer].ch;
     let mut opener = closer;
-    while opener > 0 {
+    while opener > bottom {
         opener -= 1;
         let cand = &delimiters[opener];
         if cand.node < start_node
@@ -825,9 +849,26 @@ fn code_span(src: &str, i: usize) -> Option<(Inline, usize)> {
     None
 }
 
+const MAX_HTML_INLINE: usize = 1024;
+
+/// Truncate `src` to at most `end` bytes on a char boundary. Results past
+/// `i + MAX_HTML_INLINE` are rejected by the `end - i <= MAX_HTML_INLINE`
+/// checks below anyway, so scanning within a bounded window is equivalent —
+/// and keeps repeated `<` with no `>` linear instead of rescanning to EOI.
+fn bounded_window(src: &str, mut end: usize) -> &str {
+    if end >= src.len() {
+        return src;
+    }
+    while !src.is_char_boundary(end) {
+        end -= 1;
+    }
+    &src[..end]
+}
+
 fn angle_or_html(src: &str, i: usize, tagfilter: bool) -> Option<(Inline, usize)> {
+    let src = bounded_window(src, i + MAX_HTML_INLINE + 1);
     if let Some(end) = src[i + 1..].find('>').map(|n| i + 1 + n) {
-        if end - i <= 1024 {
+        if end - i <= MAX_HTML_INLINE {
             let inside = &src[i + 1..end];
             if is_scheme_url(inside) {
                 return Some((
@@ -852,7 +893,7 @@ fn angle_or_html(src: &str, i: usize, tagfilter: bool) -> Option<(Inline, usize)
         }
     }
     if let Some(end) = html_inline_end(src, i) {
-        if end - i <= 1024 {
+        if end - i <= MAX_HTML_INLINE {
             let raw = &src[i..end];
             let raw = if tagfilter {
                 tagfilter_html(raw)
@@ -985,8 +1026,12 @@ fn trim_bare_url_end(src: &str, start: usize, mut end: usize) -> usize {
             end -= 1;
         }
     }
-    while unmatched_trailing_paren(&src[start..end]) {
+    let slice = &src[start..end];
+    let opens = slice.matches('(').count();
+    let mut closes = slice.matches(')').count();
+    while end > start && closes > opens && prev_char(src, end) == ')' {
         end -= 1;
+        closes -= 1;
     }
     trim_trailing_url_punct(src, start, end)
 }
@@ -1004,12 +1049,9 @@ fn trim_trailing_url_punct(src: &str, start: usize, mut end: usize) -> usize {
 }
 
 fn bounded_autolink_word(src: &str, i: usize) -> &str {
-    let limit = src[i..]
-        .find(char::is_whitespace)
-        .map(|n| i + n)
-        .unwrap_or(src.len())
-        .min(i + 255);
-    &src[i..limit]
+    let window = &bounded_window(src, i + 255)[i..];
+    let limit = window.find(char::is_whitespace).unwrap_or(window.len());
+    &window[..limit]
 }
 
 fn bare_email_prefix(word: &str) -> Option<&str> {
@@ -1075,15 +1117,6 @@ fn trailing_entity_like(s: &str) -> Option<usize> {
     .then_some(amp)
 }
 
-fn unmatched_trailing_paren(s: &str) -> bool {
-    if !s.ends_with(')') {
-        return false;
-    }
-    let opens = s.chars().filter(|ch| *ch == '(').count();
-    let closes = s.chars().filter(|ch| *ch == ')').count();
-    closes > opens
-}
-
 fn trim_bare_email(word: &str) -> &str {
     word.trim_matches(|c: char| ".,;:!?)".contains(c))
 }
@@ -1100,12 +1133,12 @@ fn preceded_by_angle_opener(src: &str, i: usize) -> bool {
         .is_some_and(|ch| ch == '<')
 }
 
-fn parse_link_destination_title(s: &str) -> Option<(String, Option<String>)> {
+fn parse_link_destination_title(s: &str, max_parens: usize) -> Option<(String, Option<String>)> {
     let s = trim_link_space(s);
     if s.is_empty() {
         return Some((String::new(), None));
     }
-    let (url, rest) = parse_link_destination(s)?;
+    let (url, rest) = parse_link_destination(s, max_parens)?;
     let rest = trim_link_space_start(rest);
     let title = if rest.is_empty() {
         None
@@ -1122,7 +1155,7 @@ fn parse_link_destination_title(s: &str) -> Option<(String, Option<String>)> {
     ))
 }
 
-fn parse_link_destination(s: &str) -> Option<(&str, &str)> {
+fn parse_link_destination(s: &str, max_parens: usize) -> Option<(&str, &str)> {
     if let Some(rest) = s.strip_prefix('<') {
         let mut esc = false;
         let mut i = 0;
@@ -1168,7 +1201,7 @@ fn parse_link_destination(s: &str) -> Option<(&str, &str)> {
         }
         if ch == '(' {
             depth += 1;
-            if depth > 32 {
+            if depth > max_parens {
                 return None;
             }
         } else if ch == ')' {
@@ -1252,7 +1285,7 @@ fn unescape_backslash_punctuation(s: &str) -> String {
     out
 }
 
-fn paren_content(src: &str, mut i: usize) -> Option<(&str, usize)> {
+fn paren_content(src: &str, mut i: usize, max_parens: usize) -> Option<(&str, usize)> {
     let start = i;
     let mut depth = 0usize;
     let mut esc = false;
@@ -1286,7 +1319,7 @@ fn paren_content(src: &str, mut i: usize) -> Option<(&str, usize)> {
         }
         if ch == '(' {
             depth += 1;
-            if depth > 32 {
+            if depth > max_parens {
                 return None;
             }
         } else if ch == ')' {
@@ -1361,6 +1394,43 @@ fn script_end(src: &str, mut i: usize, marker: char) -> Option<usize> {
         i += ch.len_utf8();
     }
     None
+}
+
+/// Positions from which a scan for a math closer already failed. A failed scan
+/// from `p` implies failure from any `p' >= p`: every scan starts right after a
+/// non-backslash delimiter char, so the escape state at `p'` is the same as the
+/// failed scan had when it passed `p'`. Memoizing the failure point keeps
+/// repeated unclosed openers linear instead of rescanning to end of input.
+#[derive(Default)]
+struct FailedScans {
+    bracket: Option<usize>,
+    paren: Option<usize>,
+    dollars: Option<usize>,
+    dollar: Option<usize>,
+}
+
+fn memo_find(
+    memo: &mut Option<usize>,
+    from: usize,
+    scan: impl FnOnce(usize) -> Option<usize>,
+) -> Option<usize> {
+    if memo.is_some_and(|failed| from >= failed) {
+        return None;
+    }
+    let found = scan(from);
+    if found.is_none() {
+        *memo = Some(from);
+    }
+    found
+}
+
+fn memo_find_unescaped(
+    memo: &mut Option<usize>,
+    src: &str,
+    from: usize,
+    pat: &str,
+) -> Option<usize> {
+    memo_find(memo, from, |from| find_unescaped(src, from, pat))
 }
 
 fn find_unescaped(src: &str, mut i: usize, pat: &str) -> Option<usize> {

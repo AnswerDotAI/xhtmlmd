@@ -29,19 +29,25 @@ fn preprocess_entities(s: &str) -> String {
 
 fn numeric_ref(s: &str) -> Option<(char, usize)> {
     let rest = s.strip_prefix("&#")?;
-    let (digits, radix, offset) = if let Some(rest) = rest.strip_prefix(['x', 'X']) {
-        (rest, 16, 3)
+    let (digits, radix, offset, max_digits) = if let Some(rest) = rest.strip_prefix(['x', 'X']) {
+        (rest, 16, 3, 6)
     } else {
-        (rest, 10, 2)
+        (rest, 10, 2, 7)
     };
-    let end = digits.find(';')?;
-    if end == 0 {
+    let mut end = 0;
+    for &b in digits.as_bytes() {
+        if b == b';' {
+            break;
+        }
+        if end == max_digits || !(b as char).is_digit(radix) {
+            return None;
+        }
+        end += 1;
+    }
+    if end == 0 || digits.as_bytes().get(end) != Some(&b';') {
         return None;
     }
     let raw = &digits[..end];
-    if !raw.chars().all(|ch| ch.is_digit(radix)) {
-        return None;
-    }
     let n = u32::from_str_radix(raw, radix).ok()?;
     let ch = if n == 0 {
         '\u{FFFD}'

@@ -36,6 +36,8 @@ module-name = "xhtmlmd._native"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["slow: expensive stress tests, excluded by default; run with -m slow"]
+addopts = "-m 'not slow'"
 
 [tool.fastship]
 branch = "main"

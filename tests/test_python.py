@@ -102,3 +102,11 @@ def test_cli_math_on_preserves_katex_delimiters():
     res = subprocess.run(["xhtmlmd", "--math=on"], input="\\[\nx^2\n\\]\n", text=True, capture_output=True, check=True)
     assert res.stdout == "<p>\\[\nx^2\n\\]</p>\n"
     assert res.stderr == ""
+
+def test_max_link_paren_depth_is_honored():
+    deep = "[a](" + "(" * 40 + "x" + ")" * 40 + ")"
+    assert "<a" not in to_xhtml(deep)  # over the default cap of 32
+    assert "<a" in to_xhtml(deep, max_link_paren_depth=64)
+    shallow = "[a](((x)))"
+    assert "<a" in to_xhtml(shallow)
+    assert "<a" not in to_xhtml(shallow, max_link_paren_depth=1)

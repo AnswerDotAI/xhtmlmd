@@ -25,7 +25,6 @@ pub fn parse_document(src: &str, options: &Options) -> Document {
         abbr_defs: HashMap::new(),
         attr_defs: HashMap::new(),
         footnotes: Vec::new(),
-        warnings: Vec::new(),
     };
     let blocks = parser.parse_blocks(0);
     let footnote_defs = parser
@@ -46,7 +45,6 @@ pub fn parse_document(src: &str, options: &Options) -> Document {
     Document {
         blocks: finalize_blocks(blocks, &ctx),
         footnotes: finalize_footnotes(parser.footnotes, &ctx),
-        warnings: parser.warnings,
     }
 }
 
@@ -58,7 +56,6 @@ struct Parser {
     abbr_defs: HashMap<String, String>,
     attr_defs: HashMap<String, Attr>,
     footnotes: Vec<DraftFootnote>,
-    warnings: Vec<String>,
 }
 
 struct DraftFootnote {
@@ -421,7 +418,6 @@ impl Parser {
             abbr_defs: self.abbr_defs.clone(),
             attr_defs: self.attr_defs.clone(),
             footnotes: Vec::new(),
-            warnings: Vec::new(),
         };
         let blocks = nested.parse_blocks(depth + 1);
         for (k, v) in nested.link_defs {
@@ -434,7 +430,6 @@ impl Parser {
             self.attr_defs.entry(k).or_insert(v);
         }
         self.footnotes.extend(nested.footnotes);
-        self.warnings.extend(nested.warnings);
         blocks
     }
 
@@ -446,13 +441,17 @@ impl Parser {
         let attr_defs = self.attr_defs.clone();
         let options = self.options.clone();
         let mut builder = ContainerBuilder::new(&attr_defs, &options);
+        let mut nonblank = self.i + 1;
         while self.i < self.lines.len() {
             let line = self.line();
             let next_line = self.lines.get(self.i + 1).map(String::as_str);
-            let next_nonblank = self.lines[self.i + 1..]
-                .iter()
-                .find(|line| !line.trim().is_empty())
-                .map(String::as_str);
+            if nonblank <= self.i {
+                nonblank = self.i + 1;
+            }
+            while nonblank < self.lines.len() && self.lines[nonblank].trim().is_empty() {
+                nonblank += 1;
+            }
+            let next_nonblank = self.lines.get(nonblank).map(String::as_str);
             if !builder.feed_line(line, next_line, next_nonblank) {
                 break;
             }
@@ -950,15 +949,21 @@ impl<'a> ContainerBuilder<'a> {
     }
 
     fn append_leaf(&mut self, line: String, setext: bool) -> bool {
-        self.append_leaf_inner(line, setext, true)
+        self.append_leaf_inner(line, setext, true, 0)
     }
 
-    fn append_leaf_inner(&mut self, line: String, setext: bool, allow_indented_code: bool) -> bool {
+    fn append_leaf_inner(
+        &mut self,
+        line: String,
+        setext: bool,
+        allow_indented_code: bool,
+        chain: usize,
+    ) -> bool {
         if self.append_table_row(&line) {
             self.leaf_open = true;
             return false;
         }
-        if self.append_definition_marker(&line) {
+        if self.append_definition_marker(&line, chain) {
             self.leaf_open = true;
             return false;
         }
@@ -970,7 +975,7 @@ impl<'a> ContainerBuilder<'a> {
             self.leaf_open = false;
             return false;
         }
-        if self.convert_paragraph_to_definition_list(&line) {
+        if self.convert_paragraph_to_definition_list(&line, chain) {
             self.leaf_open = true;
             return false;
         }
@@ -994,7 +999,7 @@ impl<'a> ContainerBuilder<'a> {
             self.leaf_open = false;
             return false;
         }
-        if self.open_footnote(&line) {
+        if self.open_footnote(&line, chain) {
             self.leaf_open = true;
             return false;
         }
@@ -1153,7 +1158,10 @@ impl<'a> ContainerBuilder<'a> {
         true
     }
 
-    fn append_definition_marker(&mut self, line: &str) -> bool {
+    fn append_definition_marker(&mut self, line: &str, chain: usize) -> bool {
+        if chain >= self.options.max_block_depth {
+            return false;
+        }
         let Some(first) = def_marker(line) else {
             return false;
         };
@@ -1172,12 +1180,17 @@ impl<'a> ContainerBuilder<'a> {
         self.stack.push(def);
         self.leaf_open = false;
         if !first.is_empty() {
-            self.append_leaf(first, false);
+            self.append_leaf_inner(first, false, true, chain + 1);
         }
         true
     }
 
-    fn convert_paragraph_to_definition_list(&mut self, line: &str) -> bool {
+    fn convert_paragraph_to_definition_list(&mut self, line: &str, chain: usize) -> bool {
+        if chain >= self.options.max_block_depth
+            || self.container_depth() >= self.options.max_block_depth
+        {
+            return false;
+        }
         let Some(first) = def_marker(line) else {
             return false;
         };
@@ -1213,12 +1226,15 @@ impl<'a> ContainerBuilder<'a> {
         self.stack.push(def);
         self.leaf_open = false;
         if !first.is_empty() {
-            self.append_leaf(first, false);
+            self.append_leaf_inner(first, false, true, chain + 1);
         }
         true
     }
 
-    fn open_footnote(&mut self, line: &str) -> bool {
+    fn open_footnote(&mut self, line: &str, chain: usize) -> bool {
+        if self.container_depth() >= self.options.max_block_depth {
+            return false;
+        }
         let Some((label, first)) = footnote_start(line) else {
             return false;
         };
@@ -1226,12 +1242,15 @@ impl<'a> ContainerBuilder<'a> {
         self.stack.push(idx);
         self.leaf_open = false;
         if !first.is_empty() {
-            self.append_leaf(first, false);
+            self.append_leaf_inner(first, false, true, chain + 1);
         }
         true
     }
 
     fn open_fenced_div(&mut self, line: &str) -> bool {
+        if self.container_depth() >= self.options.max_block_depth {
+            return false;
+        }
         let Some((fence_len, attrs)) = fenced_div_start(line, self.attr_defs) else {
             return false;
         };
@@ -1241,6 +1260,9 @@ impl<'a> ContainerBuilder<'a> {
     }
 
     fn open_html_markdown(&mut self, line: &str) -> bool {
+        if self.container_depth() >= self.options.max_block_depth {
+            return false;
+        }
         let Some(open) = parse_open_tag(line) else {
             return false;
         };
@@ -1321,7 +1343,7 @@ impl<'a> ContainerBuilder<'a> {
             return;
         }
         self.mark_content();
-        let can_lazy = self.append_leaf_inner(content.clone(), true, false);
+        let can_lazy = self.append_leaf_inner(content.clone(), true, false, 0);
         self.can_lazy = can_lazy && is_lazy_paragraph_continuation(&content);
     }
 
@@ -3345,12 +3367,12 @@ fn parse_grid_table(lines: &[String], parser: &mut Parser, depth: usize) -> Opti
     let mut head = Vec::new();
     let mut rows = Vec::new();
     let mut foot = Vec::new();
+    let mut entries = entries.into_iter().peekable();
     for row_idx in 0..row_count {
-        let cells = entries
-            .iter()
-            .filter(|(row, _, _)| *row == row_idx)
-            .map(|(_, _, cell)| cell.clone())
-            .collect::<Vec<_>>();
+        let mut cells = Vec::new();
+        while entries.peek().is_some_and(|(row, _, _)| *row == row_idx) {
+            cells.push(entries.next().unwrap().2);
+        }
         let row = DraftTableRow {
             attrs: Attr::default(),
             cells,

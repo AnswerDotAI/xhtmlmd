@@ -40,3 +40,11 @@ def test_tagfilter_is_opt_in():
     assert "&lt;textarea>" in filtered
     assert "&lt;script>" in filtered
     assert "&lt;/script>" in filtered
+
+def test_long_nonascii_words_near_autolink_cap_do_not_error():
+    for boundary in ("(", "a: ", "x '"):
+        for count in (126, 127, 128, 129, 130, 200):
+            inp = boundary + "é" * count + " _x_"
+            html = to_xhtml(inp)
+            assert "é" * count in html
+            assert "<em>x</em>" in html

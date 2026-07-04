@@ -78,7 +78,6 @@ pub struct LinkRef {
 pub struct Document {
     pub blocks: Vec<Block>,
     pub footnotes: Vec<Footnote>,
-    pub warnings: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
