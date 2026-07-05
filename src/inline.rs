@@ -247,7 +247,7 @@ fn parse_inner(src: &str, ctx: &InlineContext<'_>, depth: usize) -> Vec<Inline> 
         }
     }
     scanner.flush_text();
-    process_delimiters(&mut nodes, &mut delimiters);
+    process_delimiters(&mut nodes, &mut delimiters, ctx.options.underline);
     nodes_to_inlines(&nodes)
 }
 
@@ -412,7 +412,13 @@ impl InlineScanner<'_, '_> {
                 return None;
             }
         };
-        process_delimiters_range(self.nodes, self.delimiters, opener.node + 1, target_end);
+        process_delimiters_range(
+            self.nodes,
+            self.delimiters,
+            opener.node + 1,
+            target_end,
+            self.ctx.options.underline,
+        );
         let children = collect_node_inlines(self.nodes, opener.node + 1, target_end);
         match &mut item {
             Inline::Link { children: dst, .. } | Inline::Span { children: dst, .. } => {
@@ -617,8 +623,8 @@ fn delimiter_run_flags(ch: char, before: char, after: char) -> (bool, bool) {
     }
 }
 
-fn process_delimiters(nodes: &mut [Node], delimiters: &mut [Delimiter]) {
-    process_delimiters_range(nodes, delimiters, 0, usize::MAX);
+fn process_delimiters(nodes: &mut [Node], delimiters: &mut [Delimiter], underline: bool) {
+    process_delimiters_range(nodes, delimiters, 0, usize::MAX, underline);
 }
 
 fn process_delimiters_range(
@@ -626,6 +632,7 @@ fn process_delimiters_range(
     delimiters: &mut [Delimiter],
     start_node: usize,
     end_node: usize,
+    underline: bool,
 ) {
     // cmark's openers_bottom: when no opener matches a closer, remember how far
     // the search went per (char, can_open, len % 3) so later closers of the same
@@ -653,7 +660,7 @@ fn process_delimiters_range(
             closer += 1;
             continue;
         };
-        if wrap_delimiters(nodes, delimiters, opener, closer, use_len) {
+        if wrap_delimiters(nodes, delimiters, opener, closer, use_len, underline) {
             if delimiters[closer].len == 0 {
                 closer += 1;
             }
@@ -720,6 +727,7 @@ fn wrap_delimiters(
     opener: usize,
     closer: usize,
     use_len: usize,
+    underline: bool,
 ) -> bool {
     let open_node = delimiters[opener].node;
     let close_node = delimiters[closer].node;
@@ -735,6 +743,10 @@ fn wrap_delimiters(
     }
     nodes[target].inline = match delimiters[closer].ch {
         '~' => Inline::Strike {
+            attrs: Attr::default(),
+            children,
+        },
+        '_' if use_len == 2 && underline => Inline::Underline {
             attrs: Attr::default(),
             children,
         },
@@ -1754,6 +1766,13 @@ fn normalize_inline(item: Inline) -> Inline {
             }
             Inline::Strong { attrs, children }
         }
+        Inline::Underline { attrs, children } => {
+            let mut children = coalesce(children);
+            if attrs.is_empty() {
+                children = flatten_empty_underline(children);
+            }
+            Inline::Underline { attrs, children }
+        }
         Inline::Strike { attrs, children } => Inline::Strike {
             attrs,
             children: coalesce(children),
@@ -1797,6 +1816,21 @@ fn flatten_empty_strong(children: Vec<Inline>) -> Vec<Inline> {
     for child in children {
         match child {
             Inline::Strong { attrs, children } if attrs.is_empty() => {
+                for grandchild in children {
+                    push_coalesced(&mut out, grandchild);
+                }
+            }
+            x => push_coalesced(&mut out, x),
+        }
+    }
+    out
+}
+
+fn flatten_empty_underline(children: Vec<Inline>) -> Vec<Inline> {
+    let mut out = Vec::with_capacity(children.len());
+    for child in children {
+        match child {
+            Inline::Underline { attrs, children } if attrs.is_empty() => {
                 for grandchild in children {
                     push_coalesced(&mut out, grandchild);
                 }

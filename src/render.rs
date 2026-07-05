@@ -332,6 +332,13 @@ impl<'a> Renderer<'a> {
                 self.inlines(children, out);
                 out.push_str("</strong>");
             }
+            Inline::Underline { attrs, children } => {
+                out.push_str("<u");
+                attrs_html(attrs, out);
+                out.push('>');
+                self.inlines(children, out);
+                out.push_str("</u>");
+            }
             Inline::Strike { attrs, children } => {
                 out.push_str("<del");
                 attrs_html(attrs, out);
@@ -603,6 +610,7 @@ pub(crate) fn plain(items: &[Inline]) -> String {
             Inline::SoftBreak | Inline::HardBreak => out.push(' '),
             Inline::Emph { children, .. }
             | Inline::Strong { children, .. }
+            | Inline::Underline { children, .. }
             | Inline::Strike { children, .. }
             | Inline::Highlight { children, .. }
             | Inline::Span { children, .. }

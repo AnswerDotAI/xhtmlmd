@@ -18,6 +18,7 @@ xhtmlmd is largely implemented using AI, except for the tests. The tests are lar
 - Definition lists: PHP Markdown Extra/Pandoc-style `Term` followed by `: definition` or `~ definition`.
 - Footnotes: `[^id]` references to defined `[^id]:` definitions with indented continuation blocks.
 - Abbreviations: `*[HTML]: Hyper Text Markup Language` definitions render matching text as `<abbr>`.
+- Underline (opt-in): with `underline=True`, Discord-style `__x__` renders as `<u>x</u>` while `**x**` stays `<strong>`.
 - Fenced divs: Pandoc/Quarto/Djot-style `:::` containers with attributes or a single class word.
 
 ## Usage
@@ -54,7 +55,7 @@ Python callers can override rendered nodes with callbacks. Each callback receive
 Callback names:
 
 - Blocks: `paragraph`, `heading`, `block_quote`, `list`, `definition_list`, `code_block`, `html_block`, `html_container`, `thematic_break`, `table`, `div`, `math_block`
-- Inlines: `text`, `soft_break`, `hard_break`, `emph`, `strong`, `strike`, `superscript`, `subscript`, `highlight`, `code`, `link`, `image`, `autolink`, `abbr`, `html_inline`, `math_inline`, `footnote_ref`, `span`
+- Inlines: `text`, `soft_break`, `hard_break`, `emph`, `strong`, `underline`, `strike`, `superscript`, `subscript`, `highlight`, `code`, `link`, `image`, `autolink`, `abbr`, `html_inline`, `math_inline`, `footnote_ref`, `span`
 
 ```python
 from fastpylight import highlight

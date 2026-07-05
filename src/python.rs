@@ -15,6 +15,7 @@ use crate::{MathMode, Options};
     math = "brackets",
     tagfilter = false,
     balance = false,
+    underline = false,
     callbacks = None,
     max_inline_depth = None,
     max_block_depth = None,
@@ -25,6 +26,7 @@ fn to_xhtml(
     math: &str,
     tagfilter: bool,
     balance: bool,
+    underline: bool,
     callbacks: Option<Bound<'_, PyDict>>,
     max_inline_depth: Option<usize>,
     max_block_depth: Option<usize>,
@@ -34,6 +36,7 @@ fn to_xhtml(
         math: parse_math_mode(math)?,
         tagfilter,
         balance,
+        underline,
         ..Options::default()
     };
     if let Some(depth) = max_inline_depth {
@@ -194,6 +197,7 @@ fn transform_inline(item: &mut Inline, callbacks: &Bound<'_, PyDict>) -> PyResul
     match item {
         Inline::Emph { children, .. }
         | Inline::Strong { children, .. }
+        | Inline::Underline { children, .. }
         | Inline::Strike { children, .. }
         | Inline::Highlight { children, .. }
         | Inline::Link { children, .. }
@@ -276,6 +280,7 @@ fn inline_kind(item: &Inline) -> &'static str {
         Inline::HardBreak => "hard_break",
         Inline::Emph { .. } => "emph",
         Inline::Strong { .. } => "strong",
+        Inline::Underline { .. } => "underline",
         Inline::Strike { .. } => "strike",
         Inline::Superscript { .. } => "superscript",
         Inline::Subscript { .. } => "subscript",
@@ -401,6 +406,7 @@ fn inline_node<'py>(py: Python<'py>, item: &Inline) -> PyResult<Bound<'py, PyDic
         Inline::SoftBreak | Inline::HardBreak => {}
         Inline::Emph { attrs, children }
         | Inline::Strong { attrs, children }
+        | Inline::Underline { attrs, children }
         | Inline::Strike { attrs, children }
         | Inline::Highlight { attrs, children }
         | Inline::Span { attrs, children } => {

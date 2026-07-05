@@ -8,6 +8,7 @@ When Markdown extensions disagree, this crate chooses the behavior closest to Pa
 - Definition lists follow PHP Markdown Extra/Pandoc: one-line terms with one or more `:` or `~` definitions.
 - Footnotes follow Pandoc/kramdown label rules and render as XHTML endnotes with backlinks. The endnotes `<section>` has no leading `<hr>` (unlike cmark-gfm): separators are a styling concern, so add one with CSS if wanted.
 - Inline `~~x~~` renders as strikethrough. Inline `~x~` renders as subscript, using the same no-whitespace rule as superscript `^x^`.
+- The opt-in `underline` option follows Discord: `__x__` renders as `<u>x</u>` instead of `<strong>x</strong>`, with the usual underscore emphasis rules (no intraword, `___x___` nests as `<em><u>x</u></em>`). Off by default because CommonMark defines `__x__` as strong.
 - `<tag markdown="1">` parses block Markdown inside the balanced tag. `markdown="span"` parses inline content into a single paragraph child.
 - Raw HTML passes through unbalanced, per CommonMark. The opt-in `balance` option closes unclosed elements at the fragment end, drops stray closes, and self-closes void tags, without HTML5 implied-end-tag rules.
 - Math defaults to `MathMode::Brackets`, which recognizes `\(...\)`, `\[...\]`, and `$$...$$`. `MathMode::Dollars` also recognizes `$...$` with Pandoc's guard against currency-like spans. `MathMode::On` preserves backslashes before `[]()` so client-side renderers such as KaTeX can see TeX delimiters. `MathMode::Off` treats TeX delimiters as ordinary Markdown text.

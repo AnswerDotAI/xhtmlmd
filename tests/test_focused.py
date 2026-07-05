@@ -90,6 +90,22 @@ def test_balance_ignores_rawtext_and_voids():
     assert "</div>" not in html
     assert "<br />" in html
 
+def test_underline_is_opt_in():
+    assert to_xhtml("__x__") == "<p><strong>x</strong></p>\n"
+    assert to_xhtml("__x__", underline=True) == "<p><u>x</u></p>\n"
+    assert to_xhtml("**x** _y_ __z__", underline=True) == "<p><strong>x</strong> <em>y</em> <u>z</u></p>\n"
+
+def test_underline_follows_underscore_emphasis_rules():
+    assert to_xhtml("___x___", underline=True) == "<p><em><u>x</u></em></p>\n"
+    assert to_xhtml("____x____", underline=True) == "<p><u>x</u></p>\n"
+    assert to_xhtml("intra__word__", underline=True) == "<p>intra__word__</p>\n"
+    assert to_xhtml("__a **b** c__", underline=True) == "<p><u>a <strong>b</strong> c</u></p>\n"
+
+def test_underline_callback():
+    cb = lambda node, default: default.replace("<u>", '<u class="d">') if node["type"] == "underline" else None
+    html = to_xhtml("__x__", underline=True, callbacks={"underline": cb})
+    assert html == '<p><u class="d">x</u></p>\n'
+
 def test_long_nonascii_words_near_autolink_cap_do_not_error():
     for boundary in ("(", "a: ", "x '"):
         for count in (126, 127, 128, 129, 130, 200):

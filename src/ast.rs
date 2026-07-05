@@ -222,6 +222,10 @@ pub enum Inline {
         attrs: Attr,
         children: Vec<Inline>,
     },
+    Underline {
+        attrs: Attr,
+        children: Vec<Inline>,
+    },
     Strike {
         attrs: Attr,
         children: Vec<Inline>,
@@ -283,6 +287,7 @@ impl Inline {
         match self {
             Inline::Emph { attrs, .. }
             | Inline::Strong { attrs, .. }
+            | Inline::Underline { attrs, .. }
             | Inline::Strike { attrs, .. }
             | Inline::Superscript { attrs, .. }
             | Inline::Subscript { attrs, .. }
