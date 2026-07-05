@@ -90,6 +90,20 @@ def test_balance_ignores_rawtext_and_voids():
     assert "</div>" not in html
     assert "<br />" in html
 
+def test_ald_reference_alone_in_block_ial():
+    expected = '<p id="id" class="cls">Some text</p>\n'
+    assert to_xhtml("{:note: #id .cls}\n\nSome text\n{: note}\n") == expected
+    assert to_xhtml("{:note: #id .cls}\n\nSome text\n{:note}\n") == expected
+    assert to_xhtml("{:note: #id .cls}\nSome text\n{: note}\n") == expected
+
+def test_ald_reference_alone_in_span_ial():
+    html = to_xhtml("{:note: .cls}\n\nA [word]{: note} here\n")
+    assert '<span class="cls">word</span>' in html
+
+def test_undefined_ald_reference_stays_literal():
+    assert to_xhtml("Some text\n{: nope}\n") == "<p>Some text\n{: nope}</p>\n"
+    assert "[word]{nope}" in to_xhtml("A [word]{nope} here\n")
+
 def test_long_nonascii_words_near_autolink_cap_do_not_error():
     for boundary in ("(", "a: ", "x '"):
         for count in (126, 127, 128, 129, 130, 200):

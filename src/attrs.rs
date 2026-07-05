@@ -36,7 +36,7 @@ pub fn strip_trailing_attr(src: &str, defs: &HashMap<String, Attr>) -> (String, 
     };
     let body = &trimmed[open + 1..trimmed.len() - 1];
     let body = body.strip_prefix(':').unwrap_or(body).trim();
-    if !looks_like_attrs(body) {
+    if !looks_like_attrs(body, defs) {
         return (src.trim().to_string(), Attr::default());
     }
     (
@@ -73,7 +73,7 @@ pub fn parse_braced_attr(src: &str, defs: &HashMap<String, Attr>) -> Option<(Att
         if ch == '}' {
             let body = &src[1..i];
             let body = body.strip_prefix(':').unwrap_or(body).trim();
-            if looks_like_attrs(body) {
+            if looks_like_attrs(body, defs) {
                 return Some((parse_attrs_body(body, defs), i + 1));
             }
             return None;
@@ -396,13 +396,13 @@ fn last_attr_open(s: &str) -> Option<usize> {
     last
 }
 
-fn looks_like_attrs(body: &str) -> bool {
+fn looks_like_attrs(body: &str, defs: &HashMap<String, Attr>) -> bool {
     let b = body.trim();
     b.starts_with('#')
         || b.starts_with('.')
         || b.contains('=')
         || b.split_whitespace()
-            .any(|t| t.starts_with('#') || t.starts_with('.') || t.contains('='))
+            .any(|t| t.starts_with('#') || t.starts_with('.') || t.contains('=') || defs.contains_key(t))
 }
 
 fn attr_tokens(body: &str) -> Vec<String> {
