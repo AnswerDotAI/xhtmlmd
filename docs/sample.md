@@ -127,20 +127,28 @@ fn main() {
 `````markdown
 Inline math uses TeX parentheses: \(a^2 + b^2 = c^2\).
 
-Display math uses TeX brackets:
+Display math can use TeX brackets or double dollars:
 
 \[
 \int_0^1 x^2\,dx = \frac{1}{3}
 \]
+
+$$
+E = mc^2
+$$
 `````
 
 Inline math uses TeX parentheses: \(a^2 + b^2 = c^2\).
 
-Display math uses TeX brackets:
+Display math can use TeX brackets or double dollars:
 
 \[
 \int_0^1 x^2\,dx = \frac{1}{3}
 \]
+
+$$
+E = mc^2
+$$
 
 ## Attributes and spans
 
@@ -173,7 +181,7 @@ xhtmlmd
 : A Markdown parser that renders XHTML fragments.
 
 brackets math
-: Math mode that recognizes `\(...\)` and `\[...\]`.
+: Math mode that recognizes `\(...\)`, `\[...\]`, and `$$...$$`.
 
 on math
 : Math mode that preserves TeX delimiters for client-side renderers.
@@ -186,7 +194,7 @@ xhtmlmd
 : A Markdown parser that renders XHTML fragments.
 
 brackets math
-: Math mode that recognizes `\(...\)` and `\[...\]`.
+: Math mode that recognizes `\(...\)`, `\[...\]`, and `$$...$$`.
 
 on math
 : Math mode that preserves TeX delimiters for client-side renderers.

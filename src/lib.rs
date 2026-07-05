@@ -6,6 +6,7 @@
 
 pub mod ast;
 mod attrs;
+mod balance;
 mod block;
 mod entity;
 mod inline;
@@ -18,6 +19,8 @@ pub use ast::{
     Align, Attr, Block, DefinitionItem, Document, Footnote, Inline, LinkRef, ListItem, TableCell,
     TableCellContent, TableCellData, TableRow, TableRowData,
 };
+pub use balance::balance_fragment;
+pub use block::BlockSpan;
 pub use render::to_xhtml_document;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -32,6 +35,7 @@ pub enum MathMode {
 pub struct Options {
     pub math: MathMode,
     pub tagfilter: bool,
+    pub balance: bool,
     pub max_inline_depth: usize,
     pub max_block_depth: usize,
     pub max_link_paren_depth: usize,
@@ -42,6 +46,7 @@ impl Default for Options {
         Self {
             math: MathMode::Brackets,
             tagfilter: false,
+            balance: false,
             max_inline_depth: 64,
             max_block_depth: 128,
             max_link_paren_depth: 32,
@@ -52,6 +57,14 @@ impl Default for Options {
 pub fn parse(src: &str, options: &Options) -> Document {
     block::parse_document(src, options)
 }
+pub fn block_spans(src: &str, options: &Options) -> Vec<BlockSpan> {
+    block::parse_block_spans(src, options)
+}
 pub fn to_xhtml(src: &str, options: &Options) -> String {
-    render::to_xhtml_document(&parse(src, options))
+    let out = render::to_xhtml_document(&parse(src, options));
+    if options.balance {
+        balance::balance_fragment(&out)
+    } else {
+        out
+    }
 }

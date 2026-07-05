@@ -25,6 +25,13 @@ pytest -q
 
 All tests are Python (`tests/`), run against the built extension; there are no `cargo test` unit tests.
 
+## Docs
+
+```bash
+python tools/gen_docs.py
+python tools/gen_docs.py --check
+```
+
 ## Release
 
 Publishing is handled by GitHub Actions in `.github/workflows/ci.yml` and is triggered by pushing a tag matching `v*`.

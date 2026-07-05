@@ -71,7 +71,9 @@ fn parse_inner(src: &str, ctx: &InlineContext<'_>, depth: usize) -> Vec<Inline> 
                 continue;
             }
         }
-        if ctx.options.math == MathMode::Dollars && starts(src, i, "$$") {
+        if starts(src, i, "$$")
+            && matches!(ctx.options.math, MathMode::Brackets | MathMode::Dollars)
+        {
             if let Some(end) = memo_find_unescaped(&mut failed.dollars, src, i + 2, "$$") {
                 scanner.flush_text();
                 let item = Inline::Math {
@@ -269,6 +271,9 @@ fn plain_text_fast_path(src: &str, ctx: &InlineContext<'_>) -> bool {
         return false;
     }
     if ctx.options.math == MathMode::Dollars && src.contains('$') {
+        return false;
+    }
+    if ctx.options.math == MathMode::Brackets && src.contains("$$") {
         return false;
     }
     if src.contains("[^") {
@@ -1351,6 +1356,10 @@ fn find_closing_dollar(src: &str, mut i: usize) -> Option<usize> {
             } else {
                 None
             };
+            if next == Some('$') {
+                // A `$$` belongs to display math: abandon the single-dollar span.
+                return None;
+            }
             if !prev.is_whitespace() && !next.map(|c| c.is_ascii_digit()).unwrap_or(false) {
                 return Some(i);
             }

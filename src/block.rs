@@ -452,6 +452,7 @@ impl Parser {
                 nonblank += 1;
             }
             let next_nonblank = self.lines.get(nonblank).map(String::as_str);
+            builder.cur_line = self.i;
             if !builder.feed_line(line, next_line, next_nonblank) {
                 break;
             }
@@ -459,6 +460,209 @@ impl Parser {
         }
         builder.finish(self, depth + 1)
     }
+
+    fn parse_spans(&mut self) -> Vec<BlockSpan> {
+        let mut spans: Vec<BlockSpan> = Vec::new();
+        let mut last_attr_span: Option<usize> = None;
+        let mut pending_start: Option<usize> = None;
+        while self.i < self.lines.len() {
+            if self.line().trim().is_empty() || self.line().trim() == "^" {
+                self.i += 1;
+                continue;
+            }
+            if let Some(al) = parse_attr_line(self.line(), &self.attr_defs) {
+                match al {
+                    AttrLine::Ald(name, attr) => {
+                        self.attr_defs.entry(name).or_default().merge(&attr);
+                        flush_pending(&mut spans, &mut pending_start, self.i);
+                        spans.push(BlockSpan::plain("attr_def", self.i, self.i + 1));
+                        last_attr_span = None;
+                    }
+                    AttrLine::Ial(_) => match last_attr_span {
+                        Some(idx) => spans[idx].end = self.i + 1,
+                        None => {
+                            pending_start.get_or_insert(self.i);
+                        }
+                    },
+                }
+                self.i += 1;
+                continue;
+            }
+            if let Some((label, lr, next)) = self.parse_link_ref_at(self.i) {
+                self.add_link_def(label, lr);
+                flush_pending(&mut spans, &mut pending_start, self.i);
+                spans.push(BlockSpan::plain("link_ref", self.i, next));
+                last_attr_span = None;
+                self.i = next;
+                continue;
+            }
+            if let Some((label, title)) = parse_abbr_def(self.line()) {
+                self.add_abbr_def(label, title);
+                flush_pending(&mut spans, &mut pending_start, self.i);
+                spans.push(BlockSpan::plain("abbr_def", self.i, self.i + 1));
+                last_attr_span = None;
+                self.i += 1;
+                continue;
+            }
+            self.container_spans(&mut spans, &mut last_attr_span, &mut pending_start);
+        }
+        if let Some(start) = pending_start {
+            spans.push(BlockSpan::plain("attr_def", start, self.i));
+        }
+        spans
+    }
+
+    fn container_spans(
+        &mut self,
+        spans: &mut Vec<BlockSpan>,
+        last_attr_span: &mut Option<usize>,
+        pending_start: &mut Option<usize>,
+    ) {
+        let attr_defs = self.attr_defs.clone();
+        let options = self.options.clone();
+        let mut builder = ContainerBuilder::new(&attr_defs, &options);
+        let mut nonblank = self.i + 1;
+        while self.i < self.lines.len() {
+            let line = self.line();
+            let next_line = self.lines.get(self.i + 1).map(String::as_str);
+            if nonblank <= self.i {
+                nonblank = self.i + 1;
+            }
+            while nonblank < self.lines.len() && self.lines[nonblank].trim().is_empty() {
+                nonblank += 1;
+            }
+            let next_nonblank = self.lines.get(nonblank).map(String::as_str);
+            builder.cur_line = self.i;
+            if !builder.feed_line(line, next_line, next_nonblank) {
+                break;
+            }
+            self.i += 1;
+        }
+        let top = &builder.nodes[0].children;
+        for (n, &idx) in top.iter().enumerate() {
+            let start = builder.nodes[idx].start_line;
+            let mut end = top
+                .get(n + 1)
+                .map(|&next| builder.nodes[next].start_line)
+                .unwrap_or(self.i);
+            while end > start && self.lines[end - 1].trim().is_empty() {
+                end -= 1;
+            }
+            let accepts_attrs = span_accepts_attrs(&builder.nodes[idx].kind);
+            let start = if accepts_attrs {
+                pending_start.take().unwrap_or(start)
+            } else {
+                flush_pending(spans, pending_start, start);
+                start
+            };
+            spans.push(self.block_span(&builder.nodes[idx].kind, start, end));
+            *last_attr_span = accepts_attrs.then_some(spans.len() - 1);
+        }
+    }
+
+    fn block_span(&self, kind: &BuildKind, start: usize, end: usize) -> BlockSpan {
+        let mut span = BlockSpan::plain(span_kind(kind), start, end);
+        match kind {
+            BuildKind::FencedCode { info, text, .. } => {
+                let (info, lang, _) = parse_fence_info(info, &self.attr_defs);
+                span.info = Some(info);
+                span.lang = lang;
+                span.text = Some(text.clone());
+            }
+            BuildKind::IndentedCode { text } => span.text = Some(text.clone()),
+            BuildKind::Math { tex, .. } => span.text = Some(tex.trim_end().to_string()),
+            _ => {}
+        }
+        span
+    }
+}
+
+/// A top-level block's source location: `kind` names the block type and
+/// `start`/`end` are half-open 0-based line indices into the source. Code and
+/// math blocks also carry their inner `text` (and `info`/`lang` for fences).
+#[derive(Clone, Debug)]
+pub struct BlockSpan {
+    pub kind: &'static str,
+    pub start: usize,
+    pub end: usize,
+    pub info: Option<String>,
+    pub lang: Option<String>,
+    pub text: Option<String>,
+}
+
+impl BlockSpan {
+    fn plain(kind: &'static str, start: usize, end: usize) -> Self {
+        Self {
+            kind,
+            start,
+            end,
+            info: None,
+            lang: None,
+            text: None,
+        }
+    }
+}
+
+/// Emit any pending block-IAL lines as their own `attr_def` span ending at
+/// `end`, so a span that can't absorb them never swallows or leapfrogs them.
+fn flush_pending(spans: &mut Vec<BlockSpan>, pending_start: &mut Option<usize>, end: usize) {
+    if let Some(start) = pending_start.take() {
+        spans.push(BlockSpan::plain("attr_def", start, end));
+    }
+}
+
+fn span_kind(kind: &BuildKind) -> &'static str {
+    match kind {
+        BuildKind::Root | BuildKind::Paragraph { .. } => "paragraph",
+        BuildKind::BlockQuote { .. } => "block_quote",
+        BuildKind::List { .. } | BuildKind::ListItem { .. } => "list",
+        BuildKind::Footnote { .. } => "footnote_def",
+        BuildKind::DefinitionList { .. }
+        | BuildKind::DefinitionItem { .. }
+        | BuildKind::DefinitionDefinition { .. } => "definition_list",
+        BuildKind::Div { .. } => "div",
+        BuildKind::HtmlMarkdown { .. } => "html_container",
+        BuildKind::FencedCode { .. } | BuildKind::IndentedCode { .. } => "code_block",
+        BuildKind::Math { .. } => "math_block",
+        BuildKind::Heading { .. } => "heading",
+        BuildKind::ThematicBreak { .. } => "thematic_break",
+        BuildKind::HtmlBlock { .. } => "html_block",
+        BuildKind::Table { .. } | BuildKind::GridTable { .. } => "table",
+    }
+}
+
+fn span_accepts_attrs(kind: &BuildKind) -> bool {
+    matches!(
+        kind,
+        BuildKind::Paragraph { .. }
+            | BuildKind::BlockQuote { .. }
+            | BuildKind::List { .. }
+            | BuildKind::DefinitionList { .. }
+            | BuildKind::Div { .. }
+            | BuildKind::HtmlMarkdown { .. }
+            | BuildKind::FencedCode { .. }
+            | BuildKind::IndentedCode { .. }
+            | BuildKind::Math { .. }
+            | BuildKind::Heading { .. }
+            | BuildKind::ThematicBreak { .. }
+            | BuildKind::Table { .. }
+            | BuildKind::GridTable { .. }
+    )
+}
+
+pub fn parse_block_spans(src: &str, options: &Options) -> Vec<BlockSpan> {
+    let src = src.replace("\r\n", "\n").replace('\r', "\n");
+    let lines = src.lines().map(|s| s.to_string()).collect::<Vec<_>>();
+    let mut parser = Parser {
+        lines,
+        i: 0,
+        options: options.clone(),
+        link_defs: HashMap::new(),
+        abbr_defs: HashMap::new(),
+        attr_defs: HashMap::new(),
+        footnotes: Vec::new(),
+    };
+    parser.parse_spans()
 }
 
 fn append_blocks(blocks: &mut Vec<DraftBlock>, parsed: Vec<DraftBlock>) {
@@ -510,11 +714,13 @@ struct ContainerBuilder<'a> {
     leaf_open: bool,
     consumed_closer: bool,
     pending_blank_items: Vec<usize>,
+    cur_line: usize,
 }
 
 struct BuildNode {
     kind: BuildKind,
     children: Vec<usize>,
+    start_line: usize,
 }
 
 enum BuildKind {
@@ -609,6 +815,7 @@ impl<'a> ContainerBuilder<'a> {
             nodes: vec![BuildNode {
                 kind: BuildKind::Root,
                 children: Vec::new(),
+                start_line: 0,
             }],
             stack: vec![0],
             attr_defs,
@@ -617,6 +824,7 @@ impl<'a> ContainerBuilder<'a> {
             leaf_open: false,
             consumed_closer: false,
             pending_blank_items: Vec::new(),
+            cur_line: 0,
         }
     }
 
@@ -892,6 +1100,7 @@ impl<'a> ContainerBuilder<'a> {
         self.nodes.push(BuildNode {
             kind,
             children: Vec::new(),
+            start_line: self.cur_line,
         });
         self.nodes[parent].children.push(idx);
         idx
@@ -901,6 +1110,7 @@ impl<'a> ContainerBuilder<'a> {
         self.mark_previous_item_loose(list_idx);
         let idx = self.nodes.len();
         self.nodes.push(BuildNode {
+            start_line: self.cur_line,
             kind: BuildKind::ListItem {
                 attrs: Attr::default(),
                 checked: None,
@@ -1122,7 +1332,8 @@ impl<'a> ContainerBuilder<'a> {
             if let BuildKind::Paragraph { lines, .. } = &mut self.nodes[last].kind {
                 lines.pop();
             }
-            self.open_node(table);
+            let idx = self.open_node(table);
+            self.nodes[idx].start_line = self.cur_line.saturating_sub(1); // include the popped header line
         }
         true
     }
@@ -1623,7 +1834,7 @@ impl<'a> ContainerBuilder<'a> {
         let t = line.trim();
         let close = if t == "\\[" {
             "\\]"
-        } else if self.options.math == MathMode::Dollars && t == "$$" {
+        } else if t == "$$" {
             "$$"
         } else {
             return false;

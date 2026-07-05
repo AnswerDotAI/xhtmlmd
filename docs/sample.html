@@ -109,15 +109,20 @@ fn main() {
 <h2>Math in brackets mode</h2>
 <pre><code class="language-markdown">Inline math uses TeX parentheses: \(a^2 + b^2 = c^2\).
 
-Display math uses TeX brackets:
+Display math can use TeX brackets or double dollars:
 
 \[
 \int_0^1 x^2\,dx = \frac{1}{3}
 \]
+
+$$
+E = mc^2
+$$
 </code></pre>
 <p>Inline math uses TeX parentheses: <span class="math inline">a^2 + b^2 = c^2</span>.</p>
-<p>Display math uses TeX brackets:</p>
+<p>Display math can use TeX brackets or double dollars:</p>
 <div class="math display">\int_0^1 x^2\,dx = \frac{1}{3}</div>
+<div class="math display">E = mc^2</div>
 <h2>Attributes and spans</h2>
 <pre><code class="language-markdown">This paragraph gets attributes from the following block IAL.
 {: #important-note .lead data-kind="sample"}
@@ -138,7 +143,10 @@ Code spans can have attributes: <code class="api-call">render()</code>.</p>
 : A Markdown parser that renders XHTML fragments.
 
 brackets math
-: Math mode that recognizes `\(...\)` and `\[...\]`.
+: Math mode that recognizes `\(...\)`, `\[...\]`, and `$$...$$`.
+
+on math
+: Math mode that preserves TeX delimiters for client-side renderers.
 
 fenced div
 : A Pandoc-style block container opened with colons.
@@ -147,7 +155,9 @@ fenced div
 <dt>xhtmlmd</dt>
 <dd>A Markdown parser that renders XHTML fragments.</dd>
 <dt>brackets math</dt>
-<dd>Math mode that recognizes <code>\(...\)</code> and <code>\[...\]</code>.</dd>
+<dd>Math mode that recognizes <code>\(...\)</code>, <code>\[...\]</code>, and <code>$$...$$</code>.</dd>
+<dt>on math</dt>
+<dd>Math mode that preserves TeX delimiters for client-side renderers.</dd>
 <dt>fenced div</dt>
 <dd>A Pandoc-style block container opened with colons.</dd>
 </dl>
@@ -210,7 +220,6 @@ They can contain normal <strong>Markdown</strong>.</p>
 </div>
 </div>
 <section class="footnotes" role="doc-endnotes">
-<hr />
 <ol>
 <li id="fn-sample-note">
 <p>Footnotes can contain <em>inline Markdown</em> and links such as

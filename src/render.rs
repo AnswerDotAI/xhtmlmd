@@ -491,7 +491,7 @@ impl<'a> Renderer<'a> {
             }
             bodies.push((label, body));
         }
-        out.push_str("<section class=\"footnotes\" role=\"doc-endnotes\">\n<hr />\n<ol>\n");
+        out.push_str("<section class=\"footnotes\" role=\"doc-endnotes\">\n<ol>\n");
         for (label, body) in bodies {
             let note_id = footnote_id(&label);
             out.push_str("<li id=\"");
@@ -595,7 +595,7 @@ pub fn code_block_open(attr: &Attr, lang: Option<&str>) -> String {
     out
 }
 
-fn plain(items: &[Inline]) -> String {
+pub(crate) fn plain(items: &[Inline]) -> String {
     let mut out = String::new();
     for item in items {
         match item {

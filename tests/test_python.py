@@ -70,6 +70,17 @@ def test_code_block_callback_can_return_fastpylight_node():
     assert "<pre><code>if x:\n    return 1\n</code></pre></hl-code>\n" in html
 
 
+def test_image_callback_node_has_alt_text():
+    def image(node, default_html):
+        assert node["alt"] == "Bold pic"
+        assert node["url"] == "pic.png"
+        assert node["title"] == "ttl"
+        return None
+
+    html = to_xhtml('![**Bold** pic](pic.png "ttl")', callbacks={"image": image})
+    assert '<img src="pic.png" alt="Bold pic" title="ttl" />' in html
+
+
 def test_math_callbacks_with_math_core():
     from math_core import LatexToMathML
 
@@ -84,6 +95,70 @@ def test_math_callbacks_with_math_core():
     assert to_xhtml("\\[\n\\frac{a}{b}\n\\]\n", callbacks=callbacks) == '<math display="block"><mfrac><mi>a</mi><mi>b</mi></mfrac></math>\n'
     assert to_xhtml("$x^2$", callbacks=callbacks) == "<p>$x^2$</p>\n"
     assert to_xhtml("$x^2$", math="dollars", callbacks=callbacks) == "<p><math><msup><mi>x</mi><mn>2</mn></msup></math></p>\n"
+
+
+def test_blocks_top_level_source_spans():
+    from xhtmlmd import blocks
+    src = ("# Title\n\nSome para\nover two lines.\n\n```python\nx = 1\n```\n\n"
+        "- a list\n- items\n\n[ref]: https://x.com\n\nTail para with [ref].\n")
+    bs = blocks(src)
+    assert [b["type"] for b in bs] == ["heading", "paragraph", "code_block", "list", "link_ref", "paragraph"]
+    lines = src.split("\n")
+    slices = ["\n".join(lines[b["start"]:b["end"]]) for b in bs]
+    assert slices[0] == "# Title"
+    assert slices[1] == "Some para\nover two lines."
+    assert slices[2] == "```python\nx = 1\n```"
+    assert slices[3] == "- a list\n- items"
+    assert bs[2]["lang"] == "python" and bs[2]["text"] == "x = 1\n"
+    covered = {i for b in bs for i in range(b["start"], b["end"])}
+    assert all(i in covered for i, l in enumerate(lines) if l.strip())
+
+
+def test_blocks_span_edge_cases():
+    from xhtmlmd import blocks
+    src = "Setext\n======\n\nhead | er\n---- | --\ncell | s\n\n[^n]: a note def\n\n<div>\nraw\n</div>\n"
+    bs = blocks(src)
+    assert [b["type"] for b in bs] == ["heading", "table", "footnote_def", "html_block"]
+    lines = src.split("\n")
+    assert "\n".join(lines[bs[1]["start"]:bs[1]["end"]]) == "head | er\n---- | --\ncell | s"
+    assert blocks("") == []
+
+
+def test_blocks_keep_pending_ial_with_next_block():
+    from xhtmlmd import blocks, to_xhtml
+    src = "[ref]: /url\n{: #id .lead}\nPara with [ref].\n"
+    assert to_xhtml(src) == '<p id="id" class="lead">Para with <a href="/url">ref</a>.</p>\n'
+    bs = blocks(src)
+    lines = src.split("\n")
+    slices = ["\n".join(lines[b["start"]:b["end"]]) for b in bs]
+    assert [b["type"] for b in bs] == ["link_ref", "paragraph"]
+    assert slices == ["[ref]: /url", "{: #id .lead}\nPara with [ref]."]
+
+
+def test_blocks_keep_pending_ial_after_non_attr_spans():
+    from xhtmlmd import blocks, to_xhtml
+    cases = [
+        ("[^n]: note\n{: #id}\nPara\n", ["footnote_def", "paragraph"], ["[^n]: note", "{: #id}\nPara"]),
+        ("<div>\nraw\n</div>\n{: #id}\nPara\n", ["html_block", "paragraph"], ["<div>\nraw\n</div>", "{: #id}\nPara"])]
+    for src, types, slices in cases:
+        assert '<p id="id">Para</p>' in to_xhtml(src)
+        lines = src.split("\n")
+        bs = blocks(src)
+        assert [b["type"] for b in bs] == types
+        assert ["\n".join(lines[b["start"]:b["end"]]) for b in bs] == slices
+
+
+def test_blocks_ial_never_leapfrogs_non_attr_spans():
+    from xhtmlmd import blocks, to_xhtml
+    src = "Para\n\n<div>\nraw\n</div>\n{: #id}\nTail\n"
+    assert '<p id="id">Tail</p>' in to_xhtml(src)
+    lines = src.split("\n")
+    bs = blocks(src)
+    assert [b["type"] for b in bs] == ["paragraph", "html_block", "paragraph"]
+    assert ["\n".join(lines[b["start"]:b["end"]]) for b in bs] == ["Para", "<div>\nraw\n</div>", "{: #id}\nTail"]
+    for src in [src, "{: #id}\n<div>\nraw\n</div>\n\nPara\n", "Para\n\n[a]: /u\n{: .x}\nTail [a]\n"]:
+        bs = blocks(src)
+        for a, b in zip(bs, bs[1:]): assert a["end"] <= b["start"], (src, bs)
 
 
 def test_cli_reads_markdown_from_stdin():

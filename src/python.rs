@@ -5,7 +5,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
 use crate::ast::{Attr, Block, Document, Inline, TableCellContent};
-use crate::render::{code_block_open, to_xhtml_document, to_xhtml_inlines, CODE_BLOCK_CLOSE};
+use crate::render::{code_block_open, plain, to_xhtml_document, to_xhtml_inlines, CODE_BLOCK_CLOSE};
 use crate::{MathMode, Options};
 
 #[pyfunction]
@@ -14,6 +14,7 @@ use crate::{MathMode, Options};
     *,
     math = "brackets",
     tagfilter = false,
+    balance = false,
     callbacks = None,
     max_inline_depth = None,
     max_block_depth = None,
@@ -23,6 +24,7 @@ fn to_xhtml(
     markdown: &str,
     math: &str,
     tagfilter: bool,
+    balance: bool,
     callbacks: Option<Bound<'_, PyDict>>,
     max_inline_depth: Option<usize>,
     max_block_depth: Option<usize>,
@@ -31,6 +33,7 @@ fn to_xhtml(
     let mut options = Options {
         math: parse_math_mode(math)?,
         tagfilter,
+        balance,
         ..Options::default()
     };
     if let Some(depth) = max_inline_depth {
@@ -45,7 +48,12 @@ fn to_xhtml(
     if let Some(callbacks) = callbacks {
         let mut doc = guard("parsing markdown", || crate::parse(markdown, &options))?;
         apply_callbacks(&mut doc, &callbacks)?;
-        guard("rendering markdown", || to_xhtml_document(&doc))
+        let out = guard("rendering markdown", || to_xhtml_document(&doc))?;
+        if balance {
+            guard("balancing output", || crate::balance_fragment(&out))
+        } else {
+            Ok(out)
+        }
     } else {
         guard("rendering markdown", || crate::to_xhtml(markdown, &options))
     }
@@ -63,9 +71,39 @@ fn guard<T>(what: &str, f: impl FnOnce() -> T) -> PyResult<T> {
     })
 }
 
+#[pyfunction]
+#[pyo3(signature = (markdown, *, math = "brackets"))]
+fn blocks(py: Python<'_>, markdown: &str, math: &str) -> PyResult<Vec<Py<PyDict>>> {
+    let options = Options {
+        math: parse_math_mode(math)?,
+        ..Options::default()
+    };
+    let spans = guard("parsing markdown", || crate::block_spans(markdown, &options))?;
+    spans
+        .into_iter()
+        .map(|span| {
+            let d = PyDict::new(py);
+            d.set_item("type", span.kind)?;
+            d.set_item("start", span.start)?;
+            d.set_item("end", span.end)?;
+            if let Some(info) = span.info {
+                d.set_item("info", info)?;
+            }
+            if let Some(lang) = span.lang {
+                d.set_item("lang", lang)?;
+            }
+            if let Some(text) = span.text {
+                d.set_item("text", text)?;
+            }
+            Ok(d.unbind())
+        })
+        .collect()
+}
+
 #[pymodule]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(to_xhtml, m)?)?;
+    m.add_function(wrap_pyfunction!(blocks, m)?)?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
 }
@@ -393,7 +431,7 @@ fn inline_node<'py>(py: Python<'py>, item: &Inline) -> PyResult<Bound<'py, PyDic
             title,
         } => {
             set_attrs(&d, attrs)?;
-            d.set_item("alt", alt.len())?;
+            d.set_item("alt", plain(alt))?;
             d.set_item("url", url)?;
             d.set_item("title", title.as_deref())?;
         }

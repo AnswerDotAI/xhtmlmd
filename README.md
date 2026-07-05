@@ -13,7 +13,7 @@ xhtmlmd is largely implemented using AI, except for the tests. The tests are lar
 - GFM: task lists, `~~x~~` strikethrough, angle and bare autolinks, plus opt-in tagfiltering.
 - Code: backtick/tilde fenced code blocks, info strings, and Pandoc-style code attributes.
 - HTML-in-Markdown: block containers opened with `markdown="1"`; the control attribute is stripped, indented code blocks are disabled inside the container, and fenced code is the code-block syntax there.
-- Math: four modes: `brackets` for `\(...\)` and `\[...\]`, `dollars` for those plus `$...$` and `$$...$$` using Pandoc's non-space/digit dollar rules, `on` to preserve `\(...\)` and `\[...\]` delimiters for client-side renderers such as KaTeX, and `off`. Brackets mode is the default.
+- Math: four modes: `brackets` for `\(...\)`, `\[...\]`, and `$$...$$`, `dollars` for those plus `$...$` using Pandoc's non-space/digit dollar rules, `on` to preserve `\(...\)` and `\[...\]` delimiters for client-side renderers such as KaTeX, and `off`. Brackets mode is the default.
 - Attributes and inline spans: Pandoc/kramdown-style `{#id .class key="value"}`, block IALs `{: ...}`, span IALs, ALDs such as `{:note: #id .class}` with references, superscript `^x^`, subscript `~x~`, and highlight `==x==`.
 - Definition lists: PHP Markdown Extra/Pandoc-style `Term` followed by `: definition` or `~ definition`.
 - Footnotes: `[^id]` references to defined `[^id]:` definitions with indented continuation blocks.
@@ -82,6 +82,19 @@ def render_math(node, default_html):
 html = to_xhtml(markdown, callbacks={"math_inline": render_math, "math_block": render_math})
 ```
 
+### Block spans
+
+`blocks` reports where each top-level block sits in the source, so callers can split a document into per-block source slices without regenerating Markdown from a tree. Each dict has `type` (the callback names above, plus `link_ref`, `abbr_def`, `attr_def`, and `footnote_def`) and half-open 0-based `start`/`end` line indices; code and math blocks also carry their inner `text`, and fences carry `info`/`lang`.
+
+```python
+from xhtmlmd import blocks
+
+src = open("input.md").read()
+lines = src.split("\n")
+for b in blocks(src):
+    print(b["type"], "\n".join(lines[b["start"]:b["end"]]))
+```
+
 Command-line usage (the `xhtmlmd` script is installed with the package):
 
 ```bash
@@ -96,6 +109,8 @@ The parser uses the two-phase strategy described in the [CommonMark parsing-stra
 The link parser uses raw reference-label scanning, bounded parenthesis nesting, bounded link labels, URI escaping for rendered href/src attributes, and a plain-text fast path for inputs with no possible inline constructs. This keeps adversarial inputs such as deeply nested brackets, long blockquote runs, repeated `![[]()`, and unclosed comments in predictable time.
 
 Raw HTML is preserved by default. Supported raw HTML container tags such as `div`, `section`, `table`, `svg`, `math`, and custom elements stay open across blank lines until their matching close tag, with same-tag nesting counted; void and self-closing tags do not open balanced containers. Markdown inside raw HTML remains raw unless the open tag that starts the Markdown block uses `markdown="1"`; this crate does not recursively look for markdown controls inside otherwise-raw HTML. `Options::default().tagfilter` is `false`; enabling it applies GFM-style filtering for tags such as `script`, `style`, `xmp`, and `textarea`. This is compatibility and extra protection, not a replacement for sanitizing untrusted rendered HTML.
+
+Raw HTML passthrough means unbalanced source HTML produces an unbalanced fragment, exactly as CommonMark specifies. The opt-in `balance` option (`Options::default().balance` is `false`; `--balance` on the CLI) restores well-formedness after rendering: unclosed elements are closed at the end of the fragment, stray closing tags are dropped, a closing tag that skips over open elements closes them first, void elements are rewritten to self-closing form, and rawtext elements such as `script` are copied verbatim to their real close. It deliberately does not apply HTML5 implied-end-tag rules (no `<p>` auto-close) or rewrite attributes.
 
 ## Tests
 
