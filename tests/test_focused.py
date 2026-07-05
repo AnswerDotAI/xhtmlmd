@@ -90,6 +90,21 @@ def test_balance_ignores_rawtext_and_voids():
     assert "</div>" not in html
     assert "<br />" in html
 
+def test_escaped_space_is_nbsp():
+    assert to_xhtml("a\\ b\n") == "<p>a\u00a0b</p>\n"
+    assert to_xhtml("# foo\\ bar\n") == "<h1>foo\u00a0bar</h1>\n"
+
+def test_trailing_backslash_is_hard_break_at_block_end():
+    assert to_xhtml("text\\\n\nnext\n") == "<p>text<br />\n</p>\n<p>next</p>\n"
+    assert to_xhtml("\\\n") == "<p><br />\n</p>\n"
+    assert to_xhtml("\\ \n") == "<p><br />\n</p>\n"
+    assert to_xhtml("# foo\\\n") == "<h1>foo<br />\n</h1>\n"
+    assert to_xhtml("Foo\\\n----\n") == "<h2>Foo<br />\n</h2>\n"
+
+def test_escaped_backslash_is_never_a_break():
+    assert to_xhtml("a\\\\\nb\n") == "<p>a\\\nb</p>\n"
+    assert to_xhtml("a\\\\\n") == "<p>a\\</p>\n"
+
 def test_long_nonascii_words_near_autolink_cap_do_not_error():
     for boundary in ("(", "a: ", "x '"):
         for count in (126, 127, 128, 129, 130, 200):

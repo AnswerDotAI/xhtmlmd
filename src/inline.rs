@@ -42,6 +42,7 @@ fn parse_inner(src: &str, ctx: &InlineContext<'_>, depth: usize) -> Vec<Inline> 
     };
     let mut failed = FailedScans::default();
     let mut i = 0;
+    let mut last_escape_end = usize::MAX;
     while i < src.len() {
         if starts(src, i, "\\[")
             && matches!(ctx.options.math, MathMode::Brackets | MathMode::Dollars)
@@ -210,24 +211,33 @@ fn parse_inner(src: &str, ctx: &InlineContext<'_>, depth: usize) -> Vec<Inline> 
         if starts(src, i, "\\") {
             if i + 1 < src.len() {
                 let next = next_char(src, i + 1);
+                if next == ' ' {
+                    scanner.text.push('\u{a0}');
+                    i += 2;
+                    last_escape_end = i;
+                    continue;
+                }
                 if is_escapable(next) {
                     if ctx.options.math == MathMode::On && matches!(next, '[' | ']' | '(' | ')') {
                         scanner.text.push('\\');
                         scanner.text.push(next);
                         i += 1 + next.len_utf8();
+                        last_escape_end = i;
                         continue;
                     }
                     scanner
                         .text
                         .push(if next == '&' { ESCAPED_AMP } else { next });
                     i += 1 + next.len_utf8();
+                    last_escape_end = i;
                     continue;
                 }
             }
         }
         if ch == '\n' {
-            if scanner.text.ends_with("  ") || scanner.text.ends_with('\\') {
-                if scanner.text.ends_with('\\') {
+            let backslash_break = scanner.text.ends_with('\\') && last_escape_end != i;
+            if backslash_break || scanner.text.ends_with("  ") {
+                if backslash_break {
                     scanner.text.pop();
                 } else {
                     while scanner.text.ends_with(' ') {
@@ -245,6 +255,11 @@ fn parse_inner(src: &str, ctx: &InlineContext<'_>, depth: usize) -> Vec<Inline> 
             scanner.text.push(ch);
             i += ch.len_utf8();
         }
+    }
+    if scanner.text.ends_with('\\') && last_escape_end != src.len() {
+        scanner.text.pop();
+        scanner.flush_text();
+        scanner.push_inline(Inline::HardBreak);
     }
     scanner.flush_text();
     process_delimiters(&mut nodes, &mut delimiters);

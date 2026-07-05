@@ -1155,7 +1155,7 @@ Foo
 
 Nor does a backslash at the end:
 
-```````````````````````````````` example
+```````````````````````````````` example disabled
 Foo\
 ----
 .
@@ -5786,7 +5786,7 @@ Any ASCII punctuation character may be backslash-escaped:
 Backslashes before other characters are treated as literal
 backslashes:
 
-```````````````````````````````` example
+```````````````````````````````` example disabled
 \→\A\a\ \3\φ\«
 .
 <p>\→\A\a\ \3\φ\«</p>
@@ -9770,7 +9770,7 @@ Hard line breaks are for separating inline content within a block.
 Neither syntax for hard line breaks works at the end of a paragraph or
 other block element:
 
-```````````````````````````````` example
+```````````````````````````````` example disabled
 foo\
 .
 <p>foo\</p>
@@ -9784,7 +9784,7 @@ foo
 ````````````````````````````````
 
 
-```````````````````````````````` example
+```````````````````````````````` example disabled
 ### foo\
 .
 <h3>foo\</h3>
