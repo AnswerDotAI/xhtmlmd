@@ -87,7 +87,7 @@ def test_math_callbacks_with_math_core():
     mathml = LatexToMathML()
 
     def render_math(node, default_html):
-        html = mathml.convert_with_local_counter(node["tex"], displaystyle=node["type"] == "math_block")
+        html = mathml.convert_with_local_state(node["tex"], displaystyle=node["type"] == "math_block")
         return html + ("\n" if node["type"] == "math_block" else "")
 
     callbacks = {"math_inline": render_math, "math_block": render_math}
