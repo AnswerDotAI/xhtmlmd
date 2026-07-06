@@ -4,7 +4,7 @@ When Markdown extensions disagree, this crate chooses the behavior closest to Pa
 
 - Pipe tables follow PHP Markdown Extra/Pandoc/GFM alignment markers. Header rows are required.
 - Fenced divs follow Pandoc: an opening fence has at least three colons and attributes or a single class word; a closing fence is a colon-only line of at least three colons.
-- Attribute syntax is kramdown/Pandoc-compatible: `#id`, `.class`, `key="value"`, ALDs, block IALs, and span IALs. Key/value pairs override earlier keys; classes accumulate.
+- Attribute syntax is kramdown/Pandoc-compatible: `#id`, `.class`, `key="value"`, ALDs, block IALs, and span IALs. A braced group is an attribute list only when it starts with `:`, `#`, `.`, or a `key=value` pair; bare words in braces stay literal text. Key/value pairs override earlier keys; classes accumulate. Trailing lists attach to emphasis, strong, and strikethrough as well as the bracket constructs, and an IAL line directly after a table attaches to the table.
 - Definition lists follow PHP Markdown Extra/Pandoc: one-line terms with one or more `:` or `~` definitions.
 - Footnotes follow Pandoc/kramdown label rules and render as XHTML endnotes with backlinks. The endnotes `<section>` has no leading `<hr>` (unlike cmark-gfm): separators are a styling concern, so add one with CSS if wanted.
 - Inline `~~x~~` renders as strikethrough. Inline `~x~` renders as subscript, using the same no-whitespace rule as superscript `^x^`.

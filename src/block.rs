@@ -1346,6 +1346,7 @@ impl<'a> ContainerBuilder<'a> {
             return false;
         };
         let BuildKind::Table {
+            attrs,
             aligns,
             rows,
             trim_leading_body_pipe,
@@ -1356,6 +1357,11 @@ impl<'a> ContainerBuilder<'a> {
         };
         if line.trim().is_empty() || (starts_block(line) && !line.contains('|')) {
             return false;
+        }
+        if let Some(AttrLine::Ial(a)) = parse_attr_line(line, self.attr_defs) {
+            attrs.merge(&a);
+            self.leaf_open = false;
+            return true;
         }
         let mut row = split_table_body_row(line, *trim_leading_body_pipe);
         row.resize(aligns.len(), String::new());

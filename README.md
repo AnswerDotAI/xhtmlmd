@@ -20,6 +20,25 @@ xhtmlmd is largely implemented using AI, except for the tests. The tests are lar
 - Abbreviations: `*[HTML]: Hyper Text Markup Language` definitions render matching text as `<abbr>`.
 - Fenced divs: Pandoc/Quarto/Djot-style `:::` containers with attributes or a single class word.
 
+## Attributes
+
+A braced group is an attribute list only when it starts with `:`, `#`, `.`, or a `key=value` pair. Anything else in braces is ordinary text, so prose like `use {braces} freely` keeps its content. The marker forms follow Pandoc: `{#id .class key="value"}`. The colon form follows kramdown: `{:note}` and `{: note}` apply the attribute definition named `note`, and an unknown name in a colon-marked list is ignored while the list itself is still consumed.
+
+ALDs (attribute list definitions) are kramdown's named bundles. `{:note: #id .class}` on its own line defines `note`; a reference resolves either as a colon-marked list (`{:note}`) or as a bare token inside a list already recognized by its markers (`{.x note}`).
+
+Attribute lists attach to:
+
+- Headings, ATX and setext: `# Head {#h}`.
+- Paragraphs: a trailing list at the end of the last line.
+- Fenced code: in the info string, `python {.numberLines}` after the opening fence.
+- Fenced divs: in the `:::` opener.
+- Link reference definitions: `[r]: /url "title" {.external}` applies the attributes to every link resolved through that reference.
+- Any block, via a standalone IAL line `{: ...}`: it modifies the preceding block, including directly after the last row of a table; with no preceding block it applies to the next one.
+- Inline constructs, when the list follows immediately with no space: spans `[x]{.c}`, links, images, code spans, emphasis, strong, strikethrough, superscript, subscript, highlight, and math.
+
+Raw HTML blocks take no attribute lists; write attributes in the HTML itself.
+
+
 ## Usage
 
 Install via pip to get both the Python API and the native `xhtmlmd` CLI:

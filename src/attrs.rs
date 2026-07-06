@@ -35,8 +35,11 @@ pub fn strip_trailing_attr(src: &str, defs: &HashMap<String, Attr>) -> (String, 
         return (src.trim().to_string(), Attr::default());
     };
     let body = &trimmed[open + 1..trimmed.len() - 1];
-    let body = body.strip_prefix(':').unwrap_or(body).trim();
-    if !looks_like_attrs(body) {
+    let (body, had_colon) = match body.strip_prefix(':') {
+        Some(rest) => (rest.trim(), true),
+        None => (body.trim(), false),
+    };
+    if !looks_like_attrs(body, had_colon) {
         return (src.trim().to_string(), Attr::default());
     }
     (
@@ -72,8 +75,11 @@ pub fn parse_braced_attr(src: &str, defs: &HashMap<String, Attr>) -> Option<(Att
         }
         if ch == '}' {
             let body = &src[1..i];
-            let body = body.strip_prefix(':').unwrap_or(body).trim();
-            if looks_like_attrs(body) {
+            let (body, had_colon) = match body.strip_prefix(':') {
+                Some(rest) => (rest.trim(), true),
+                None => (body.trim(), false),
+            };
+            if looks_like_attrs(body, had_colon) {
                 return Some((parse_attrs_body(body, defs), i + 1));
             }
             return None;
@@ -396,13 +402,21 @@ fn last_attr_open(s: &str) -> Option<usize> {
     last
 }
 
-fn looks_like_attrs(body: &str) -> bool {
+fn looks_like_attrs(body: &str, had_colon: bool) -> bool {
     let b = body.trim();
+    if b.is_empty() {
+        return false;
+    }
+    if had_colon {
+        return true;
+    }
     b.starts_with('#')
         || b.starts_with('.')
-        || b.contains('=')
-        || b.split_whitespace()
-            .any(|t| t.starts_with('#') || t.starts_with('.') || t.contains('='))
+        || b
+            .split_whitespace()
+            .next()
+            .and_then(|t| t.find('='))
+            .is_some_and(|pos| pos > 0)
 }
 
 fn attr_tokens(body: &str) -> Vec<String> {

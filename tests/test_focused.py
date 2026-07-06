@@ -97,3 +97,38 @@ def test_long_nonascii_words_near_autolink_cap_do_not_error():
             html = to_xhtml(inp)
             assert "é" * count in html
             assert "<em>x</em>" in html
+
+def test_attr_gate_requires_marker():
+    # Pandoc-style marker-first bodies attach
+    assert to_xhtml('# H {#h .c}\n') == '<h1 id="h" class="c">H</h1>\n'
+    assert to_xhtml('![x](/i.png){width="50%"}\n') == '<p><img src="/i.png" alt="x" width="50%" /></p>\n'
+    # kramdown colon forms attach, including pure ALD references
+    expected = '<p id="id" class="cls">Some text</p>\n'
+    assert to_xhtml('{:note: #id .cls}\n\nSome text\n{:note}\n') == expected
+    assert to_xhtml('{:note: #id .cls}\n\nSome text\n{: note}\n') == expected
+    assert '<span id="id" class="cls">word</span>' in to_xhtml('{:note: #id .cls}\n\nA [word]{: note} here\n')
+    # a colon-marked list with an unknown reference is still an attr list (consumed, ref ignored)
+    assert to_xhtml('Some text\n{: nope}\n') == '<p>Some text</p>\n'
+    # bare-word bodies stay literal, even when a word matches an ALD name
+    assert to_xhtml('{:note: #id .cls}\n\nSome text\n{note}\n') == '<p>Some text\n{note}</p>\n'
+    assert to_xhtml('{:note: #id .cls}\n\nSome text\n{great note}\n') == '<p>Some text\n{great note}</p>\n'
+    assert to_xhtml('{:note: #id .cls}\n\nSome text\n{note .x}\n') == '<p>Some text\n{note .x}</p>\n'
+    assert '[word]{note}' in to_xhtml('{:note: #id .cls}\n\nA [word]{note} here\n')
+    # key=value only counts when the first token is a pair
+    assert to_xhtml('Text\n{foo k=1}\n') == '<p>Text\n{foo k=1}</p>\n'
+
+def test_emphasis_strong_strike_trailing_attrs():
+    assert to_xhtml('a **x**{.c} b\n') == '<p>a <strong class="c">x</strong> b</p>\n'
+    assert to_xhtml('a *x*{: .c} b\n') == '<p>a <em class="c">x</em> b</p>\n'
+    assert to_xhtml('a ~~x~~{#i .c} b\n') == '<p>a <del id="i" class="c">x</del> b</p>\n'
+    assert to_xhtml('a ***x***{.c} b\n') == '<p>a <em class="c"><strong>x</strong></em> b</p>\n'
+    assert to_xhtml('{:note: .cls}\n\na **x**{: note} b\n') == '<p>a <strong class="cls">x</strong> b</p>\n'
+    # bare words and non-adjacent braces stay literal
+    assert to_xhtml('a **x**{note} b\n') == '<p>a <strong>x</strong>{note} b</p>\n'
+    assert to_xhtml('a **x** {.c} b\n') == '<p>a <strong>x</strong> {.c} b</p>\n'
+
+def test_table_ial_line_attaches():
+    html = to_xhtml('a|b\n-|-\n1|2\n{: .c}\n')
+    assert html.startswith('<table class="c">')
+    assert '{: .c}' not in html
+

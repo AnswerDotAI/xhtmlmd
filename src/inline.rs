@@ -247,7 +247,7 @@ fn parse_inner(src: &str, ctx: &InlineContext<'_>, depth: usize) -> Vec<Inline> 
         }
     }
     scanner.flush_text();
-    process_delimiters(&mut nodes, &mut delimiters);
+    process_delimiters(&mut nodes, &mut delimiters, ctx.attr_defs);
     nodes_to_inlines(&nodes)
 }
 
@@ -412,7 +412,7 @@ impl InlineScanner<'_, '_> {
                 return None;
             }
         };
-        process_delimiters_range(self.nodes, self.delimiters, opener.node + 1, target_end);
+        process_delimiters_range(self.nodes, self.delimiters, opener.node + 1, target_end, self.ctx.attr_defs);
         let children = collect_node_inlines(self.nodes, opener.node + 1, target_end);
         match &mut item {
             Inline::Link { children: dst, .. } | Inline::Span { children: dst, .. } => {
@@ -617,8 +617,8 @@ fn delimiter_run_flags(ch: char, before: char, after: char) -> (bool, bool) {
     }
 }
 
-fn process_delimiters(nodes: &mut [Node], delimiters: &mut [Delimiter]) {
-    process_delimiters_range(nodes, delimiters, 0, usize::MAX);
+fn process_delimiters(nodes: &mut [Node], delimiters: &mut [Delimiter], defs: &HashMap<String, Attr>) {
+    process_delimiters_range(nodes, delimiters, 0, usize::MAX, defs);
 }
 
 fn process_delimiters_range(
@@ -626,6 +626,7 @@ fn process_delimiters_range(
     delimiters: &mut [Delimiter],
     start_node: usize,
     end_node: usize,
+    defs: &HashMap<String, Attr>,
 ) {
     // cmark's openers_bottom: when no opener matches a closer, remember how far
     // the search went per (char, can_open, len % 3) so later closers of the same
@@ -653,7 +654,7 @@ fn process_delimiters_range(
             closer += 1;
             continue;
         };
-        if wrap_delimiters(nodes, delimiters, opener, closer, use_len) {
+        if wrap_delimiters(nodes, delimiters, opener, closer, use_len, defs) {
             if delimiters[closer].len == 0 {
                 closer += 1;
             }
@@ -720,6 +721,7 @@ fn wrap_delimiters(
     opener: usize,
     closer: usize,
     use_len: usize,
+    defs: &HashMap<String, Attr>,
 ) -> bool {
     let open_node = delimiters[opener].node;
     let close_node = delimiters[closer].node;
@@ -750,6 +752,9 @@ fn wrap_delimiters(
     nodes[target].alive = true;
     trim_delimiter_node(nodes, delimiters, opener, use_len, true);
     trim_delimiter_node(nodes, delimiters, closer, use_len, false);
+    if delimiters[closer].len == 0 {
+        attach_trailing_attrs(nodes, target, close_node, defs);
+    }
     for delim in delimiters.iter_mut() {
         if delim.node > open_node && delim.node < close_node {
             delim.active = false;
@@ -758,6 +763,34 @@ fn wrap_delimiters(
     true
 }
 
+
+fn attach_trailing_attrs(
+    nodes: &mut [Node],
+    target: usize,
+    close_node: usize,
+    defs: &HashMap<String, Attr>,
+) {
+    let next = close_node + 1;
+    while next < nodes.len() && nodes[next].alive {
+        let Inline::Text(text) = &nodes[next].inline else {
+            return;
+        };
+        let Some((attr, n)) = trailing_attr(text, defs) else {
+            return;
+        };
+        if let Some(dst) = nodes[target].inline.attrs_mut() {
+            dst.merge(&attr);
+        }
+        let Inline::Text(text) = &mut nodes[next].inline else {
+            return;
+        };
+        text.drain(..n);
+        if text.is_empty() {
+            nodes[next].alive = false;
+            return;
+        }
+    }
+}
 fn trim_delimiter_node(
     nodes: &mut [Node],
     delimiters: &mut [Delimiter],
