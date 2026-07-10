@@ -12,6 +12,12 @@ def test_dialect_fixture():
     expected = (FIX / "dialect.xhtml").read_text()
     assert _norm(to_xhtml(md)) == _norm(expected)
 
+def test_flanking_treats_unicode_punctuation_as_punctuation():
+    html = to_xhtml("(“***{{company_common_name}}***”)")
+    assert "“<em><strong>{{company_common_name}}</strong></em>”" in html
+    html = to_xhtml("“__{{x}}__”")
+    assert "“<strong>{{x}}</strong>”" in html
+
 def test_default_math_mode_is_brackets():
     html = to_xhtml("\\(y\\)\n\n\\[\nx^2\n\\]\n\n$x$")
     assert '<span class="math inline">y</span>' in html
