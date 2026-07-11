@@ -7,7 +7,7 @@ use crate::attrs::{
     strip_trailing_attr, valid_link_label, AttrLine,
 };
 use crate::entity::decode_entities;
-use crate::inline::{parse_inlines, InlineContext};
+use crate::inline::{find_edit_nodes, parse_inlines, EditNode, InlineContext};
 use crate::line::Line;
 use crate::tagfilter::{is_tagfiltered_start, tagfilter_html};
 use crate::{MathMode, Options};
@@ -15,10 +15,10 @@ use std::collections::{HashMap, HashSet};
 use unicode_width::UnicodeWidthChar;
 
 pub fn parse_document(src: &str, options: &Options) -> Document {
-    parse_source(src, options).0
+    parse_source(src, options, false).0
 }
 
-fn parse_source(src: &str, options: &Options) -> (Document, Vec<BlockSpan>) {
+fn parse_source(src: &str, options: &Options, collect_edits: bool) -> (Document, Vec<BlockSpan>, Vec<EditNode>) {
     let src = src.replace("\r\n", "\n").replace('\r', "\n");
     let lines = src.lines().map(|s| s.to_string()).collect::<Vec<_>>();
     let mut parser = Parser {
@@ -29,6 +29,8 @@ fn parse_source(src: &str, options: &Options) -> (Document, Vec<BlockSpan>) {
         abbr_defs: HashMap::new(),
         attr_defs: HashMap::new(),
         footnotes: Vec::new(),
+        edit_regions: Vec::new(),
+        collect_edits,
     };
     let parsed = parser.parse_blocks_with_spans(0);
     let footnote_defs = parser
@@ -46,11 +48,16 @@ fn parse_source(src: &str, options: &Options) -> (Document, Vec<BlockSpan>) {
         abbr_labels: &abbr_labels,
         footnote_defs: &footnote_defs,
     };
+    let edits = if collect_edits {
+        edit_nodes_for_regions(&src, &parser.lines, &parser.edit_regions, &ctx)
+    } else {
+        Vec::new()
+    };
     let doc = Document {
         blocks: finalize_blocks(parsed.blocks, &ctx),
         footnotes: finalize_footnotes(parser.footnotes, &ctx),
     };
-    (doc, parsed.spans)
+    (doc, parsed.spans, edits)
 }
 
 struct Parser {
@@ -61,6 +68,8 @@ struct Parser {
     abbr_defs: HashMap<String, String>,
     attr_defs: HashMap<String, Attr>,
     footnotes: Vec<DraftFootnote>,
+    edit_regions: Vec<(usize, usize)>,
+    collect_edits: bool,
 }
 
 struct ParsedBlocks {
@@ -465,6 +474,8 @@ impl Parser {
             abbr_defs: self.abbr_defs.clone(),
             attr_defs: self.attr_defs.clone(),
             footnotes: Vec::new(),
+            edit_regions: Vec::new(),
+            collect_edits: self.collect_edits,
         };
         let blocks = nested.parse_blocks(depth + 1);
         for (k, v) in nested.link_defs {
@@ -505,6 +516,7 @@ impl Parser {
             }
             self.i += 1;
         }
+        if self.collect_edits { self.edit_regions.extend(builder.edit_regions(self.i)); }
         let spans = self.builder_spans(&builder);
         let blocks = builder.finish(self, depth + 1);
         ParsedBlocks { blocks, spans }
@@ -617,7 +629,39 @@ fn span_kind_accepts_attrs(kind: &str) -> bool {
 }
 
 pub fn parse_block_spans(src: &str, options: &Options) -> Vec<BlockSpan> {
-    parse_source(src, options).1
+    parse_source(src, options, false).1
+}
+
+pub fn parse_edit_nodes(src: &str, options: &Options) -> Vec<EditNode> {
+    parse_source(src, options, true).2
+}
+
+fn edit_nodes_for_regions(
+    src: &str,
+    lines: &[String],
+    regions: &[(usize, usize)],
+    ctx: &InlineContext<'_>,
+) -> Vec<EditNode> {
+    let mut starts = Vec::with_capacity(lines.len());
+    let mut offset = 0;
+    for line in lines {
+        starts.push(offset);
+        offset += line.len() + 1;
+    }
+    let mut out = Vec::new();
+    for &(start, end) in regions {
+        if start >= end { continue; }
+        let byte_start = starts[start];
+        let byte_end = starts[end - 1] + lines[end - 1].len();
+        for mut node in find_edit_nodes(&src[byte_start..byte_end], ctx) {
+            node.shift(byte_start);
+            out.push(node);
+        }
+    }
+    out.sort_by_key(|node| match node {
+        EditNode::Image { range, .. } | EditNode::Math { range, .. } => range.start,
+    });
+    out
 }
 
 fn append_blocks(blocks: &mut Vec<DraftBlock>, parsed: Vec<DraftBlock>) {
@@ -2051,6 +2095,34 @@ impl<'a> ContainerBuilder<'a> {
 
     fn finish(&self, parser: &mut Parser, depth: usize) -> Vec<DraftBlock> {
         self.finish_children(0, parser, depth)
+    }
+
+    fn edit_regions(&self, end: usize) -> Vec<(usize, usize)> {
+        let mut out = Vec::new();
+        self.collect_edit_regions(0, end, &mut out);
+        out
+    }
+
+    fn collect_edit_regions(&self, idx: usize, end: usize, out: &mut Vec<(usize, usize)>) {
+        let children = &self.nodes[idx].children;
+        for (n, &child) in children.iter().enumerate() {
+            let child_end = children
+                .get(n + 1)
+                .map(|&next| self.nodes[next].start_line)
+                .unwrap_or(end);
+            match self.nodes[child].kind {
+                BuildKind::Paragraph { .. } | BuildKind::Heading { .. } | BuildKind::Table { .. } => {
+                    out.push((self.nodes[child].start_line, child_end));
+                }
+                BuildKind::FencedCode { .. }
+                | BuildKind::IndentedCode { .. }
+                | BuildKind::HtmlBlock { .. }
+                | BuildKind::Math { .. }
+                | BuildKind::GridTable { .. }
+                | BuildKind::ThematicBreak { .. } => {}
+                _ => self.collect_edit_regions(child, child_end, out),
+            }
+        }
     }
 
     fn finish_children(&self, idx: usize, parser: &mut Parser, depth: usize) -> Vec<DraftBlock> {

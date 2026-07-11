@@ -66,6 +66,66 @@ html_for_katex = to_xhtml(r"\(x^2\)", math="on")
 html_with_dollars = to_xhtml("$x$", math="dollars")
 ```
 
+### Markdown rewriting
+
+`rewrite` changes recognized Markdown constructs without regenerating the rest of the document. A callback returns `None` to leave a construct alone, a string to replace the whole construct, or a dict to replace one of its named fields.
+
+This converts inline dollar math to bracket math:
+
+```python
+from xhtmlmd import rewrite
+
+def bracket_math(node):
+    if node["delimiter"] != "$": return None
+    return rf"\({node['tex']}\)"
+
+markdown = rewrite(markdown, {"math_inline": bracket_math}, math="dollars")
+```
+
+An image callback can save a data URL and replace only its destination. The alt text, title, attributes, and original spacing are preserved.
+
+```python
+from base64 import b64decode
+from pathlib import Path
+from xhtmlmd import rewrite
+
+def save_image(node):
+    if not node["url"].startswith("data:image/png;base64,"): return None
+    path = Path("images/plot.png")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b64decode(node["url"].split(",", 1)[1]))
+    return {"url": path.as_posix()}
+
+markdown = rewrite(markdown, {"image": save_image})
+```
+
+Callbacks run in source order. Their edits are checked first and then applied from the end of the document, so an early replacement cannot invalidate a later source position. Exceptions from callbacks are passed through unchanged.
+
+Every callback node is a dict with these common fields:
+
+- `type`: callback name, currently `image` or `math_inline`.
+- `source`: the exact source text for the construct.
+- `start`, `end`: half-open character offsets into the original Python string.
+
+An `image` node has:
+
+- `form`: currently always `inline`.
+- `alt`: plain alt text.
+- `url`: the decoded image destination.
+- `title`: decoded title text, or `None`.
+
+An image callback may return `{"url": "new destination"}`. Other image fields are read-only. Reference-style images such as `![alt][id]` are not callback targets.
+
+A `math_inline` node has:
+
+- `delimiter`: `$`, `$$`, `\(`, or `\[`.
+- `tex`: content without delimiters.
+- `display`: `True` for `$$` and `\[`, otherwise `False`.
+
+A math callback may return `{"tex": "new TeX"}` to preserve the delimiters, or a string to replace the entire construct. Dollar math is recognized only with `math="dollars"`, using the same dollar rules as rendering.
+
+Rewriting is confined to inline-capable prose regions. Inline code, fenced and indented code blocks, raw HTML blocks, block math, link reference definitions, and grid tables are left untouched. Inline images and math inside paragraphs, headings, lists, block quotes, definition bodies, footnotes, and pipe tables are supported.
+
 ### Callbacks
 
 Python callers can override rendered nodes with callbacks. Each callback receives a node dict and the default XHTML for that node. Return `None` to keep the default, or return replacement XHTML.

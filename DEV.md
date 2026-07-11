@@ -32,6 +32,12 @@ python tools/gen_docs.py
 python tools/gen_docs.py --check
 ```
 
+## Source rewriting
+
+The Python `rewrite` API gets edit nodes from the native `edit_nodes` function. During the block parse, `ContainerBuilder` records the line ranges of paragraphs, headings, and pipe tables, including those nested in containers. Opaque blocks such as code, raw HTML, block math, and grid tables produce no editable ranges. The inline edit scanner runs only over those ranges and shares the parser's math, code-span, image-destination, and link-label helpers.
+
+Native offsets refer to normalized UTF-8 input. The Python wrapper maps them back to character offsets in the original string, including CRLF input, invokes callbacks in source order, and applies their replacements in reverse order. Edit nodes should be added only for constructs with exact contiguous source ranges; they do not require or imply a source-mapped semantic AST.
+
 ## Release
 
 Publishing is handled by GitHub Actions in `.github/workflows/ci.yml` and is triggered by pushing a tag matching `v*`.

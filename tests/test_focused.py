@@ -2,15 +2,16 @@
 from pathlib import Path
 
 from xhtmlmd import to_xhtml
+from test_conformance import normalize_html
 
 FIX = Path(__file__).parent / "fixtures"
 
-def _norm(s): return "\n".join(l.rstrip() for l in s.splitlines()).strip()
+def assert_html(actual, expected): assert normalize_html(actual) == normalize_html(expected)
 
 def test_dialect_fixture():
     md = (FIX / "dialect.md").read_text()
     expected = (FIX / "dialect.xhtml").read_text()
-    assert _norm(to_xhtml(md)) == _norm(expected)
+    assert_html(to_xhtml(md), expected)
 
 def test_default_math_mode_is_brackets():
     html = to_xhtml("\\(y\\)\n\n\\[\nx^2\n\\]\n\n$x$")
@@ -40,8 +41,8 @@ def test_math_modes_are_explicit():
     assert "$x$ and (y)" in html
     html = to_xhtml(r"$x$ and \(y\) and \[z\]", math="on")
     assert 'class="math' not in html
-    assert html == "<p>$x$ and \\(y\\) and \\[z\\]</p>\n"
-    assert to_xhtml("\\[\nx^2\n\\]\n", math="on") == "<p>\\[\nx^2\n\\]</p>\n"
+    assert_html(html, "<p>$x$ and \\(y\\) and \\[z\\]</p>")
+    assert_html(to_xhtml("\\[\nx^2\n\\]\n", math="on"), "<p>\\[\nx^2\n\\]</p>")
     html = to_xhtml("$x$ and \\(y\\)", math="brackets")
     assert "$x$" in html
     assert '<span class="math inline">y</span>' in html
@@ -75,7 +76,7 @@ def test_balance_drops_stray_closes():
 
 def test_balance_keeps_cross_block_html_pairs():
     inp = "<div>\n\n*md*\n\n</div>\n"
-    assert to_xhtml(inp, balance=True) == to_xhtml(inp)
+    assert_html(to_xhtml(inp, balance=True), to_xhtml(inp))
 
 def test_balance_closes_mismatched_interleave():
     html = to_xhtml("<div><span>\nx\n\n", balance=True)
@@ -100,35 +101,34 @@ def test_long_nonascii_words_near_autolink_cap_do_not_error():
 
 def test_attr_gate_requires_marker():
     # Pandoc-style marker-first bodies attach
-    assert to_xhtml('# H {#h .c}\n') == '<h1 id="h" class="c">H</h1>\n'
-    assert to_xhtml('![x](/i.png){width="50%"}\n') == '<p><img src="/i.png" alt="x" width="50%" /></p>\n'
+    assert_html(to_xhtml('# H {#h .c}\n'), '<h1 id="h" class="c">H</h1>')
+    assert_html(to_xhtml('![x](/i.png){width="50%"}\n'), '<p><img src="/i.png" alt="x" width="50%" /></p>')
     # kramdown colon forms attach, including pure ALD references
     expected = '<p id="id" class="cls">Some text</p>\n'
-    assert to_xhtml('{:note: #id .cls}\n\nSome text\n{:note}\n') == expected
-    assert to_xhtml('{:note: #id .cls}\n\nSome text\n{: note}\n') == expected
+    assert_html(to_xhtml('{:note: #id .cls}\n\nSome text\n{:note}\n'), expected)
+    assert_html(to_xhtml('{:note: #id .cls}\n\nSome text\n{: note}\n'), expected)
     assert '<span id="id" class="cls">word</span>' in to_xhtml('{:note: #id .cls}\n\nA [word]{: note} here\n')
     # a colon-marked list with an unknown reference is still an attr list (consumed, ref ignored)
-    assert to_xhtml('Some text\n{: nope}\n') == '<p>Some text</p>\n'
+    assert_html(to_xhtml('Some text\n{: nope}\n'), '<p>Some text</p>')
     # bare-word bodies stay literal, even when a word matches an ALD name
-    assert to_xhtml('{:note: #id .cls}\n\nSome text\n{note}\n') == '<p>Some text\n{note}</p>\n'
-    assert to_xhtml('{:note: #id .cls}\n\nSome text\n{great note}\n') == '<p>Some text\n{great note}</p>\n'
-    assert to_xhtml('{:note: #id .cls}\n\nSome text\n{note .x}\n') == '<p>Some text\n{note .x}</p>\n'
+    assert_html(to_xhtml('{:note: #id .cls}\n\nSome text\n{note}\n'), '<p>Some text\n{note}</p>')
+    assert_html(to_xhtml('{:note: #id .cls}\n\nSome text\n{great note}\n'), '<p>Some text\n{great note}</p>')
+    assert_html(to_xhtml('{:note: #id .cls}\n\nSome text\n{note .x}\n'), '<p>Some text\n{note .x}</p>')
     assert '[word]{note}' in to_xhtml('{:note: #id .cls}\n\nA [word]{note} here\n')
     # key=value only counts when the first token is a pair
-    assert to_xhtml('Text\n{foo k=1}\n') == '<p>Text\n{foo k=1}</p>\n'
+    assert_html(to_xhtml('Text\n{foo k=1}\n'), '<p>Text\n{foo k=1}</p>')
 
 def test_emphasis_strong_strike_trailing_attrs():
-    assert to_xhtml('a **x**{.c} b\n') == '<p>a <strong class="c">x</strong> b</p>\n'
-    assert to_xhtml('a *x*{: .c} b\n') == '<p>a <em class="c">x</em> b</p>\n'
-    assert to_xhtml('a ~~x~~{#i .c} b\n') == '<p>a <del id="i" class="c">x</del> b</p>\n'
-    assert to_xhtml('a ***x***{.c} b\n') == '<p>a <em class="c"><strong>x</strong></em> b</p>\n'
-    assert to_xhtml('{:note: .cls}\n\na **x**{: note} b\n') == '<p>a <strong class="cls">x</strong> b</p>\n'
+    assert_html(to_xhtml('a **x**{.c} b\n'), '<p>a <strong class="c">x</strong> b</p>')
+    assert_html(to_xhtml('a *x*{: .c} b\n'), '<p>a <em class="c">x</em> b</p>')
+    assert_html(to_xhtml('a ~~x~~{#i .c} b\n'), '<p>a <del id="i" class="c">x</del> b</p>')
+    assert_html(to_xhtml('a ***x***{.c} b\n'), '<p>a <em class="c"><strong>x</strong></em> b</p>')
+    assert_html(to_xhtml('{:note: .cls}\n\na **x**{: note} b\n'), '<p>a <strong class="cls">x</strong> b</p>')
     # bare words and non-adjacent braces stay literal
-    assert to_xhtml('a **x**{note} b\n') == '<p>a <strong>x</strong>{note} b</p>\n'
-    assert to_xhtml('a **x** {.c} b\n') == '<p>a <strong>x</strong> {.c} b</p>\n'
+    assert_html(to_xhtml('a **x**{note} b\n'), '<p>a <strong>x</strong>{note} b</p>')
+    assert_html(to_xhtml('a **x** {.c} b\n'), '<p>a <strong>x</strong> {.c} b</p>')
 
 def test_table_ial_line_attaches():
     html = to_xhtml('a|b\n-|-\n1|2\n{: .c}\n')
     assert html.startswith('<table class="c">')
     assert '{: .c}' not in html
-
