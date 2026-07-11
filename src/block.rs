@@ -15,6 +15,10 @@ use std::collections::{HashMap, HashSet};
 use unicode_width::UnicodeWidthChar;
 
 pub fn parse_document(src: &str, options: &Options) -> Document {
+    parse_source(src, options).0
+}
+
+fn parse_source(src: &str, options: &Options) -> (Document, Vec<BlockSpan>) {
     let src = src.replace("\r\n", "\n").replace('\r', "\n");
     let lines = src.lines().map(|s| s.to_string()).collect::<Vec<_>>();
     let mut parser = Parser {
@@ -26,7 +30,7 @@ pub fn parse_document(src: &str, options: &Options) -> Document {
         attr_defs: HashMap::new(),
         footnotes: Vec::new(),
     };
-    let blocks = parser.parse_blocks(0);
+    let parsed = parser.parse_blocks_with_spans(0);
     let footnote_defs = parser
         .footnotes
         .iter()
@@ -42,10 +46,11 @@ pub fn parse_document(src: &str, options: &Options) -> Document {
         abbr_labels: &abbr_labels,
         footnote_defs: &footnote_defs,
     };
-    Document {
-        blocks: finalize_blocks(blocks, &ctx),
+    let doc = Document {
+        blocks: finalize_blocks(parsed.blocks, &ctx),
         footnotes: finalize_footnotes(parser.footnotes, &ctx),
-    }
+    };
+    (doc, parsed.spans)
 }
 
 struct Parser {
@@ -56,6 +61,11 @@ struct Parser {
     abbr_defs: HashMap<String, String>,
     attr_defs: HashMap<String, Attr>,
     footnotes: Vec<DraftFootnote>,
+}
+
+struct ParsedBlocks {
+    blocks: Vec<DraftBlock>,
+    spans: Vec<BlockSpan>,
 }
 
 struct DraftFootnote {
@@ -340,20 +350,26 @@ fn finalize_table_rows(rows: Vec<DraftTableRow>, ctx: &InlineContext<'_>) -> Vec
 
 impl Parser {
     fn parse_blocks(&mut self, depth: usize) -> Vec<DraftBlock> {
+        self.parse_blocks_with_spans(depth).blocks
+    }
+
+    fn parse_blocks_with_spans(&mut self, depth: usize) -> ParsedBlocks {
         if depth > self.options.max_block_depth {
-            return vec![DraftBlock::Paragraph {
-                attrs: Attr::default(),
-                text: self.lines[self.i..].join("\n"),
-            }];
+            return ParsedBlocks {
+                blocks: vec![DraftBlock::Paragraph {
+                    attrs: Attr::default(),
+                    text: self.lines[self.i..].join("\n"),
+                }],
+                spans: vec![BlockSpan::plain("paragraph", self.i, self.lines.len())],
+            };
         }
         let mut blocks = Vec::new();
+        let mut spans: Vec<BlockSpan> = Vec::new();
         let mut pending = Attr::default();
+        let mut pending_start = None;
+        let mut last_attr_span: Option<usize> = None;
         while self.i < self.lines.len() {
-            if self.line().trim().is_empty() {
-                self.i += 1;
-                continue;
-            }
-            if self.line().trim() == "^" {
+            if self.line().trim().is_empty() || self.line().trim() == "^" {
                 self.i += 1;
                 continue;
             }
@@ -361,12 +377,19 @@ impl Parser {
                 match al {
                     AttrLine::Ald(name, attr) => {
                         self.attr_defs.entry(name).or_default().merge(&attr);
+                        flush_pending(&mut spans, &mut pending_start, self.i);
+                        spans.push(BlockSpan::plain("attr_def", self.i, self.i + 1));
+                        last_attr_span = None;
                     }
                     AttrLine::Ial(attr) => {
                         if let Some(last) = blocks.last_mut().and_then(DraftBlock::attrs_mut) {
                             last.merge(&attr);
+                            if let Some(idx) = last_attr_span {
+                                spans[idx].end = self.i + 1;
+                            }
                         } else {
                             pending.merge(&attr);
+                            pending_start.get_or_insert(self.i);
                         }
                     }
                 }
@@ -375,24 +398,48 @@ impl Parser {
             }
             if let Some((label, lr, next)) = self.parse_link_ref_at(self.i) {
                 self.add_link_def(label, lr);
+                flush_pending(&mut spans, &mut pending_start, self.i);
+                spans.push(BlockSpan::plain("link_ref", self.i, next));
+                last_attr_span = None;
                 self.i = next;
                 continue;
             }
             if let Some((label, title)) = parse_abbr_def(self.line()) {
                 self.add_abbr_def(label, title);
+                flush_pending(&mut spans, &mut pending_start, self.i);
+                spans.push(BlockSpan::plain("abbr_def", self.i, self.i + 1));
+                last_attr_span = None;
                 self.i += 1;
                 continue;
             }
             let mut parsed = self.parse_one(depth);
             if !pending.is_empty() {
-                if let Some(dst) = parsed.first_mut().and_then(DraftBlock::attrs_mut) {
+                if let Some(dst) = parsed.blocks.first_mut().and_then(DraftBlock::attrs_mut) {
                     dst.merge(&pending);
                     pending = Attr::default();
                 }
             }
-            append_blocks(&mut blocks, parsed);
+            if let Some(first) = parsed.spans.first_mut() {
+                if span_kind_accepts_attrs(first.kind) {
+                    if let Some(start) = pending_start.take() {
+                        first.start = start;
+                    }
+                } else {
+                    flush_pending(&mut spans, &mut pending_start, first.start);
+                }
+            }
+            last_attr_span = parsed
+                .spans
+                .last()
+                .filter(|span| span_kind_accepts_attrs(span.kind))
+                .map(|_| spans.len() + parsed.spans.len() - 1);
+            spans.extend(parsed.spans);
+            append_blocks(&mut blocks, parsed.blocks);
         }
-        blocks
+        if let Some(start) = pending_start {
+            spans.push(BlockSpan::plain("attr_def", start, self.i));
+        }
+        ParsedBlocks { blocks, spans }
     }
 
     fn add_link_def(&mut self, label: String, link_ref: LinkRef) {
@@ -405,7 +452,7 @@ impl Parser {
         self.abbr_defs.entry(label).or_insert(title);
     }
 
-    fn parse_one(&mut self, depth: usize) -> Vec<DraftBlock> {
+    fn parse_one(&mut self, depth: usize) -> ParsedBlocks {
         self.container_block(depth)
     }
 
@@ -437,7 +484,7 @@ impl Parser {
         &self.lines[self.i]
     }
 
-    fn container_block(&mut self, depth: usize) -> Vec<DraftBlock> {
+    fn container_block(&mut self, depth: usize) -> ParsedBlocks {
         let attr_defs = self.attr_defs.clone();
         let options = self.options.clone();
         let mut builder = ContainerBuilder::new(&attr_defs, &options);
@@ -458,106 +505,27 @@ impl Parser {
             }
             self.i += 1;
         }
-        builder.finish(self, depth + 1)
+        let spans = self.builder_spans(&builder);
+        let blocks = builder.finish(self, depth + 1);
+        ParsedBlocks { blocks, spans }
     }
 
-    fn parse_spans(&mut self) -> Vec<BlockSpan> {
-        let mut spans: Vec<BlockSpan> = Vec::new();
-        let mut last_attr_span: Option<usize> = None;
-        let mut pending_start: Option<usize> = None;
-        while self.i < self.lines.len() {
-            if self.line().trim().is_empty() || self.line().trim() == "^" {
-                self.i += 1;
-                continue;
-            }
-            if let Some(al) = parse_attr_line(self.line(), &self.attr_defs) {
-                match al {
-                    AttrLine::Ald(name, attr) => {
-                        self.attr_defs.entry(name).or_default().merge(&attr);
-                        flush_pending(&mut spans, &mut pending_start, self.i);
-                        spans.push(BlockSpan::plain("attr_def", self.i, self.i + 1));
-                        last_attr_span = None;
-                    }
-                    AttrLine::Ial(_) => match last_attr_span {
-                        Some(idx) => spans[idx].end = self.i + 1,
-                        None => {
-                            pending_start.get_or_insert(self.i);
-                        }
-                    },
-                }
-                self.i += 1;
-                continue;
-            }
-            if let Some((label, lr, next)) = self.parse_link_ref_at(self.i) {
-                self.add_link_def(label, lr);
-                flush_pending(&mut spans, &mut pending_start, self.i);
-                spans.push(BlockSpan::plain("link_ref", self.i, next));
-                last_attr_span = None;
-                self.i = next;
-                continue;
-            }
-            if let Some((label, title)) = parse_abbr_def(self.line()) {
-                self.add_abbr_def(label, title);
-                flush_pending(&mut spans, &mut pending_start, self.i);
-                spans.push(BlockSpan::plain("abbr_def", self.i, self.i + 1));
-                last_attr_span = None;
-                self.i += 1;
-                continue;
-            }
-            self.container_spans(&mut spans, &mut last_attr_span, &mut pending_start);
-        }
-        if let Some(start) = pending_start {
-            spans.push(BlockSpan::plain("attr_def", start, self.i));
-        }
-        spans
-    }
-
-    fn container_spans(
-        &mut self,
-        spans: &mut Vec<BlockSpan>,
-        last_attr_span: &mut Option<usize>,
-        pending_start: &mut Option<usize>,
-    ) {
-        let attr_defs = self.attr_defs.clone();
-        let options = self.options.clone();
-        let mut builder = ContainerBuilder::new(&attr_defs, &options);
-        let mut nonblank = self.i + 1;
-        while self.i < self.lines.len() {
-            let line = self.line();
-            let next_line = self.lines.get(self.i + 1).map(String::as_str);
-            if nonblank <= self.i {
-                nonblank = self.i + 1;
-            }
-            while nonblank < self.lines.len() && self.lines[nonblank].trim().is_empty() {
-                nonblank += 1;
-            }
-            let next_nonblank = self.lines.get(nonblank).map(String::as_str);
-            builder.cur_line = self.i;
-            if !builder.feed_line(line, next_line, next_nonblank) {
-                break;
-            }
-            self.i += 1;
-        }
+    fn builder_spans(&self, builder: &ContainerBuilder<'_>) -> Vec<BlockSpan> {
         let top = &builder.nodes[0].children;
-        for (n, &idx) in top.iter().enumerate() {
-            let start = builder.nodes[idx].start_line;
-            let mut end = top
-                .get(n + 1)
-                .map(|&next| builder.nodes[next].start_line)
-                .unwrap_or(self.i);
-            while end > start && self.lines[end - 1].trim().is_empty() {
-                end -= 1;
-            }
-            let accepts_attrs = span_accepts_attrs(&builder.nodes[idx].kind);
-            let start = if accepts_attrs {
-                pending_start.take().unwrap_or(start)
-            } else {
-                flush_pending(spans, pending_start, start);
-                start
-            };
-            spans.push(self.block_span(&builder.nodes[idx].kind, start, end));
-            *last_attr_span = accepts_attrs.then_some(spans.len() - 1);
-        }
+        top.iter()
+            .enumerate()
+            .map(|(n, &idx)| {
+                let start = builder.nodes[idx].start_line;
+                let mut end = top
+                    .get(n + 1)
+                    .map(|&next| builder.nodes[next].start_line)
+                    .unwrap_or(self.i);
+                while end > start && self.lines[end - 1].trim().is_empty() {
+                    end -= 1;
+                }
+                self.block_span(&builder.nodes[idx].kind, start, end)
+            })
+            .collect()
     }
 
     fn block_span(&self, kind: &BuildKind, start: usize, end: usize) -> BlockSpan {
@@ -631,38 +599,25 @@ fn span_kind(kind: &BuildKind) -> &'static str {
     }
 }
 
-fn span_accepts_attrs(kind: &BuildKind) -> bool {
+fn span_kind_accepts_attrs(kind: &str) -> bool {
     matches!(
         kind,
-        BuildKind::Paragraph { .. }
-            | BuildKind::BlockQuote { .. }
-            | BuildKind::List { .. }
-            | BuildKind::DefinitionList { .. }
-            | BuildKind::Div { .. }
-            | BuildKind::HtmlMarkdown { .. }
-            | BuildKind::FencedCode { .. }
-            | BuildKind::IndentedCode { .. }
-            | BuildKind::Math { .. }
-            | BuildKind::Heading { .. }
-            | BuildKind::ThematicBreak { .. }
-            | BuildKind::Table { .. }
-            | BuildKind::GridTable { .. }
+        "paragraph"
+            | "block_quote"
+            | "list"
+            | "definition_list"
+            | "div"
+            | "html_container"
+            | "code_block"
+            | "math_block"
+            | "heading"
+            | "thematic_break"
+            | "table"
     )
 }
 
 pub fn parse_block_spans(src: &str, options: &Options) -> Vec<BlockSpan> {
-    let src = src.replace("\r\n", "\n").replace('\r', "\n");
-    let lines = src.lines().map(|s| s.to_string()).collect::<Vec<_>>();
-    let mut parser = Parser {
-        lines,
-        i: 0,
-        options: options.clone(),
-        link_defs: HashMap::new(),
-        abbr_defs: HashMap::new(),
-        attr_defs: HashMap::new(),
-        footnotes: Vec::new(),
-    };
-    parser.parse_spans()
+    parse_source(src, options).1
 }
 
 fn append_blocks(blocks: &mut Vec<DraftBlock>, parsed: Vec<DraftBlock>) {
