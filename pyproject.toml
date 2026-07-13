@@ -39,5 +39,8 @@ testpaths = ["tests"]
 markers = ["slow: expensive stress tests, excluded by default; run with -m slow"]
 addopts = "-m 'not slow'"
 
+[tool.uv]
+cache-keys = [{ file = "pyproject.toml" }, { file = "src/**/*.rs" }, { file = "Cargo.toml" }, { file = "Cargo.lock" }]
+
 [tool.fastship]
 branch = "main"
