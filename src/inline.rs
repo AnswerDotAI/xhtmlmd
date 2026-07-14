@@ -193,6 +193,14 @@ fn parse_inner(src: &str, ctx: &InlineContext<'_>, depth: usize) -> Vec<Inline> 
     let mut failed = FailedScans::default();
     let mut i = 0;
     while i < src.len() {
+        if ctx.options.mustache && starts(src, i, "{{") {
+            if let Some((item, next)) = mustache(src, i) {
+                scanner.flush_text();
+                scanner.push_inline(item);
+                i = next;
+                continue;
+            }
+        }
         if starts(src, i, "\\[")
             && matches!(ctx.options.math, MathMode::Brackets | MathMode::Dollars)
         {
@@ -420,6 +428,9 @@ fn plain_text_fast_path(src: &str, ctx: &InlineContext<'_>) -> bool {
     if src.contains("==") {
         return false;
     }
+    if ctx.options.mustache && src.contains("{{") {
+        return false;
+    }
     if ctx.options.math == MathMode::Dollars && src.contains('$') {
         return false;
     }
@@ -435,6 +446,24 @@ fn plain_text_fast_path(src: &str, ctx: &InlineContext<'_>) -> bool {
     let can_link_or_span =
         src.contains("](") || src.contains("][") || src.contains("]{") || !ctx.link_defs.is_empty();
     !can_link_or_span
+}
+
+fn mustache(src: &str, i: usize) -> Option<(Inline, usize)> {
+    let end = src[i + 2..].find("}}")? + i + 4;
+    let body = src[i + 2..end - 2].trim_start();
+    let class = match body.chars().next() {
+        Some('#' | '^' | '/') => "mustache.section",
+        Some('!') => "mustache.comment",
+        Some('>') => "mustache.partial",
+        _ => "mustache.placeholder",
+    };
+    Some((
+        Inline::Span {
+            attrs: Attr::with_class(class),
+            children: vec![Inline::Html(src[i..end].to_string())],
+        },
+        end,
+    ))
 }
 
 struct InlineScanner<'a, 'b> {

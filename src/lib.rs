@@ -34,6 +34,7 @@ pub enum MathMode {
 #[derive(Clone, Debug)]
 pub struct Options {
     pub math: MathMode,
+    pub mustache: bool,
     pub tagfilter: bool,
     pub balance: bool,
     pub max_inline_depth: usize,
@@ -45,6 +46,7 @@ impl Default for Options {
     fn default() -> Self {
         Self {
             math: MathMode::Brackets,
+            mustache: true,
             tagfilter: false,
             balance: false,
             max_inline_depth: 64,

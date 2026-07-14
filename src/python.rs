@@ -14,6 +14,7 @@ use crate::{MathMode, Options};
     markdown,
     *,
     math = "brackets",
+    mustache = true,
     tagfilter = false,
     balance = false,
     callbacks = None,
@@ -24,6 +25,7 @@ use crate::{MathMode, Options};
 fn to_xhtml(
     markdown: &str,
     math: &str,
+    mustache: bool,
     tagfilter: bool,
     balance: bool,
     callbacks: Option<Bound<'_, PyDict>>,
@@ -33,6 +35,7 @@ fn to_xhtml(
 ) -> PyResult<String> {
     let mut options = Options {
         math: parse_math_mode(math)?,
+        mustache,
         tagfilter,
         balance,
         ..Options::default()

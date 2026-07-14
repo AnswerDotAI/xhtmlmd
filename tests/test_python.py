@@ -37,6 +37,21 @@ def test_invalid_math_mode_raises():
     with pytest.raises(ValueError, match="math must be"): to_xhtml("x", math="inline")
 
 
+def test_mustache_placeholders_are_opaque_and_can_be_disabled():
+    src = "{{name.name}} {{#items}} {{/items}} {{^empty}} {{/empty}} {{! comment}} {{> partial}} {{*markdown*}}"
+    html = to_xhtml(src)
+    assert html.count('class="mustache.placeholder"') == 2
+    assert html.count('class="mustache.section"') == 4
+    assert html.count('class="mustache.comment"') == 1
+    assert html.count('class="mustache.partial"') == 1
+    assert '<span class="mustache.placeholder">{{name.name}}</span>' in html
+    assert '<span class="mustache.section">{{#items}}</span>' in html
+    assert '<span class="mustache.comment">{{! comment}}</span>' in html
+    assert '<span class="mustache.partial">{{> partial}}</span>' in html
+    assert "{{*markdown*}}" in html and "<em>markdown</em>" not in html
+    assert_html(to_xhtml("{{*markdown*}}", mustache=False), "<p>{{<em>markdown</em>}}</p>")
+
+
 def test_node_callback_can_override_heading():
     calls = []
 
