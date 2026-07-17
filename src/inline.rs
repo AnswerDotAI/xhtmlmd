@@ -7,6 +7,7 @@ use crate::tagfilter::tagfilter_html;
 use crate::{MathMode, Options};
 use std::collections::{HashMap, HashSet};
 use unicode_properties::{GeneralCategoryGroup, UnicodeGeneralCategory};
+use std::ops::Range;
 
 const ESCAPED_AMP: char = '\u{E000}';
 
@@ -17,6 +18,155 @@ pub struct InlineContext<'a> {
     pub abbr_defs: &'a HashMap<String, String>,
     pub abbr_labels: &'a [String],
     pub footnote_defs: &'a HashSet<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum EditNode {
+    Image {
+        range: Range<usize>,
+        url_range: Range<usize>,
+        alt: String,
+        url: String,
+        title: Option<String>,
+    },
+    Math {
+        range: Range<usize>,
+        delimiter: &'static str,
+        tex: String,
+    },
+}
+
+impl EditNode {
+    pub fn shift(&mut self, offset: usize) {
+        match self {
+            Self::Image { range, url_range, .. } => {
+                range.start += offset;
+                range.end += offset;
+                url_range.start += offset;
+                url_range.end += offset;
+            }
+            Self::Math { range, .. } => {
+                range.start += offset;
+                range.end += offset;
+            }
+        }
+    }
+}
+
+pub fn find_edit_nodes(src: &str, ctx: &InlineContext<'_>) -> Vec<EditNode> {
+    let mut out = Vec::new();
+    let mut failed = FailedScans::default();
+    let mut i = 0;
+    while i < src.len() {
+        if starts(src, i, "\\[")
+            && matches!(ctx.options.math, MathMode::Brackets | MathMode::Dollars)
+        {
+            if let Some(end) = memo_find_unescaped(&mut failed.bracket, src, i + 2, "\\]") {
+                out.push(EditNode::Math {
+                    range: i..end + 2,
+                    delimiter: "\\[",
+                    tex: src[i + 2..end].to_string(),
+                });
+                i = end + 2;
+                continue;
+            }
+        }
+        if starts(src, i, "\\(")
+            && matches!(ctx.options.math, MathMode::Brackets | MathMode::Dollars)
+        {
+            if let Some(end) = memo_find_unescaped(&mut failed.paren, src, i + 2, "\\)") {
+                out.push(EditNode::Math {
+                    range: i..end + 2,
+                    delimiter: "\\(",
+                    tex: src[i + 2..end].to_string(),
+                });
+                i = end + 2;
+                continue;
+            }
+        }
+        if starts(src, i, "$$")
+            && matches!(ctx.options.math, MathMode::Brackets | MathMode::Dollars)
+        {
+            if let Some(end) = memo_find_unescaped(&mut failed.dollars, src, i + 2, "$$") {
+                out.push(EditNode::Math {
+                    range: i..end + 2,
+                    delimiter: "$$",
+                    tex: src[i + 2..end].trim().to_string(),
+                });
+                i = end + 2;
+                continue;
+            }
+        }
+        if ctx.options.math == MathMode::Dollars && starts(src, i, "$") && can_open_dollar(src, i) {
+            if let Some(end) = memo_find(&mut failed.dollar, i + 1, |from| find_closing_dollar(src, from)) {
+                out.push(EditNode::Math {
+                    range: i..end + 1,
+                    delimiter: "$",
+                    tex: src[i + 1..end].to_string(),
+                });
+                i = end + 1;
+                continue;
+            }
+        }
+        if starts(src, i, "`") {
+            if let Some((_, next)) = code_span(src, i) {
+                i = next;
+                continue;
+            }
+        }
+        if starts(src, i, "![") {
+            if let Some((node, next)) = inline_image_edit_node(src, i, ctx) {
+                out.push(node);
+                i = next;
+                continue;
+            }
+        }
+        if starts(src, i, "[") {
+            if let Some(next) = inline_link_end(src, i, ctx.options.max_link_paren_depth) {
+                i = next;
+                continue;
+            }
+        }
+        if starts(src, i, "<") {
+            if let Some((_, next)) = angle_or_html(src, i, ctx.options.tagfilter) {
+                i = next;
+                continue;
+            }
+        }
+        if starts(src, i, "\\") && i + 1 < src.len() {
+            i += 1 + next_char(src, i + 1).len_utf8();
+        } else {
+            i += next_char(src, i).len_utf8();
+        }
+    }
+    out
+}
+
+fn inline_link_end(src: &str, i: usize, max_parens: usize) -> Option<usize> {
+    let (_, label_len) = scan_link_label(&src[i..])?;
+    let after = i + label_len;
+    if after >= src.len() || !starts(src, after, "(") { return None; }
+    paren_content(src, after + 1, max_parens).map(|(_, next)| next)
+}
+
+fn inline_image_edit_node(src: &str, i: usize, ctx: &InlineContext<'_>) -> Option<(EditNode, usize)> {
+    let (alt, label_len) = scan_link_label(&src[i + 1..])?;
+    let after = i + 1 + label_len;
+    if after >= src.len() || !starts(src, after, "(") { return None; }
+    let max_parens = ctx.options.max_link_paren_depth;
+    let (inside, next) = paren_content(src, after + 1, max_parens)?;
+    let trimmed = trim_link_space(inside);
+    let raw_url = if trimmed.is_empty() {
+        &trim_link_space_start(inside)[..0]
+    } else {
+        parse_link_destination(trimmed, max_parens)?.0
+    };
+    let (url, title) = parse_link_destination_title(inside, max_parens)?;
+    let inside_start = after + 1;
+    let url_start = inside_start + raw_url.as_ptr() as usize - inside.as_ptr() as usize;
+    let url_range = url_start..url_start + raw_url.len();
+    let alt = crate::render::plain(&parse_inlines(&alt, ctx));
+    Some((EditNode::Image { range: i..next, url_range, alt, url, title }, next))
 }
 
 pub fn parse_inlines(src: &str, ctx: &InlineContext<'_>) -> Vec<Inline> {

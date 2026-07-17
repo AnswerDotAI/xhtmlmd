@@ -5,6 +5,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
 use crate::ast::{Attr, Block, Document, Inline, TableCellContent};
+use crate::inline::EditNode;
 use crate::render::{code_block_open, plain, to_xhtml_document, to_xhtml_inlines, CODE_BLOCK_CLOSE};
 use crate::{MathMode, Options};
 
@@ -100,10 +101,48 @@ fn blocks(py: Python<'_>, markdown: &str, math: &str) -> PyResult<Vec<Py<PyDict>
         .collect()
 }
 
+#[pyfunction]
+#[pyo3(signature = (markdown, *, math = "brackets"))]
+fn edit_nodes(py: Python<'_>, markdown: &str, math: &str) -> PyResult<Vec<Py<PyDict>>> {
+    let options = Options { math: parse_math_mode(math)?, ..Options::default() };
+    let nodes = guard("parsing markdown edit nodes", || crate::block::parse_edit_nodes(markdown, &options))?;
+    nodes
+        .into_iter()
+        .map(|node| {
+            let d = PyDict::new(py);
+            match node {
+                EditNode::Image { range, url_range, alt, url, title } => {
+                    d.set_item("type", "image")?;
+                    d.set_item("form", "inline")?;
+                    d.set_item("source", &markdown[range.clone()])?;
+                    d.set_item("start", range.start)?;
+                    d.set_item("end", range.end)?;
+                    d.set_item("alt", alt)?;
+                    d.set_item("url", url)?;
+                    d.set_item("title", title)?;
+                    d.set_item("_url_start", url_range.start)?;
+                    d.set_item("_url_end", url_range.end)?;
+                }
+                EditNode::Math { range, delimiter, tex } => {
+                    d.set_item("type", "math_inline")?;
+                    d.set_item("source", &markdown[range.clone()])?;
+                    d.set_item("start", range.start)?;
+                    d.set_item("end", range.end)?;
+                    d.set_item("delimiter", delimiter)?;
+                    d.set_item("display", matches!(delimiter, "\\[" | "$$"))?;
+                    d.set_item("tex", tex)?;
+                }
+            }
+            Ok(d.unbind())
+        })
+        .collect()
+}
+
 #[pymodule]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(to_xhtml, m)?)?;
     m.add_function(wrap_pyfunction!(blocks, m)?)?;
+    m.add_function(wrap_pyfunction!(edit_nodes, m)?)?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
 }
