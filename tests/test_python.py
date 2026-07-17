@@ -239,3 +239,18 @@ def test_max_link_paren_depth_is_honored():
     shallow = "[a](((x)))"
     assert "<a" in to_xhtml(shallow)
     assert "<a" not in to_xhtml(shallow, max_link_paren_depth=1)
+
+def test_table_widths_node_and_cli():
+    calls = []
+
+    def table(node, default_html):
+        calls.append(node["widths"])
+        assert '<col style="width: 75%" />' in default_html
+        return None
+
+    to_xhtml("| a | b |\n|------|--|\n| x | y |\n", callbacks={"table": table})
+    assert calls == [[0.75, 0.25]]
+    res = subprocess.run(["xhtmlmd"], input="| a | b |\n|------|--|\n| x | y |\n", text=True, capture_output=True, check=True)
+    assert '<col style="width: 75%" />' in res.stdout
+    res = subprocess.run(["xhtmlmd", "--no-table-widths"], input="| a | b |\n|------|--|\n| x | y |\n", text=True, capture_output=True, check=True)
+    assert "<colgroup>" not in res.stdout

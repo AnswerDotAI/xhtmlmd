@@ -175,6 +175,7 @@ pub enum Block {
     Table {
         attrs: Attr,
         aligns: Vec<Align>,
+        widths: Vec<f64>,
         head: Vec<TableRow>,
         rows: Vec<TableRow>,
         foot: Vec<TableRow>,

@@ -16,6 +16,7 @@ use crate::{MathMode, Options};
     math = "brackets",
     tagfilter = false,
     balance = false,
+    table_widths = true,
     callbacks = None,
     max_inline_depth = None,
     max_block_depth = None,
@@ -26,6 +27,7 @@ fn to_xhtml(
     math: &str,
     tagfilter: bool,
     balance: bool,
+    table_widths: bool,
     callbacks: Option<Bound<'_, PyDict>>,
     max_inline_depth: Option<usize>,
     max_block_depth: Option<usize>,
@@ -35,6 +37,7 @@ fn to_xhtml(
         math: parse_math_mode(math)?,
         tagfilter,
         balance,
+        table_widths,
         ..Options::default()
     };
     if let Some(depth) = max_inline_depth {
@@ -400,6 +403,7 @@ fn block_node<'py>(py: Python<'py>, block: &Block) -> PyResult<Bound<'py, PyDict
         Block::Table {
             attrs,
             aligns,
+            widths,
             head,
             rows,
             foot,
@@ -409,6 +413,7 @@ fn block_node<'py>(py: Python<'py>, block: &Block) -> PyResult<Bound<'py, PyDict
                 "aligns",
                 aligns.iter().map(ToString::to_string).collect::<Vec<_>>(),
             )?;
+            d.set_item("widths", widths.clone())?;
             d.set_item(
                 "head_cells",
                 head.iter().map(|row| row.cells.len()).sum::<usize>(),

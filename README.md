@@ -9,7 +9,7 @@ xhtmlmd is largely implemented using AI, except for the tests. The tests are lar
 ## Implemented syntax
 
 - Core block syntax: paragraphs, ATX/setext headings, thematic breaks, block quotes, ordered/unordered lists, indented code, raw HTML, link reference definitions.
-- Tables: GFM/PHP Extra pipe tables with alignment, and Pandoc grid tables with alignment, headerless tables, block cell content, row spans, column spans, and footers.
+- Tables: GFM/PHP Extra pipe tables with alignment, and Pandoc grid tables with alignment, headerless tables, block cell content, row spans, column spans, footers, and pipe-table column widths from separator dash counts.
 - GFM: task lists, `~~x~~` strikethrough, angle and bare autolinks, plus opt-in tagfiltering.
 - Code: backtick/tilde fenced code blocks, info strings, and Pandoc-style code attributes.
 - HTML-in-Markdown: block containers opened with `markdown="1"`; the control attribute is stripped, indented code blocks are disabled inside the container, and fenced code is the code-block syntax there.
@@ -65,6 +65,16 @@ html = to_xhtml(r"\(x^2\)")
 html_for_katex = to_xhtml(r"\(x^2\)", math="on")
 html_with_dollars = to_xhtml("$x$", math="dollars")
 ```
+
+### Table column widths
+
+Pipe tables can state relative column widths through the separator row: `|------|--|` renders as a `<colgroup>` giving the columns 75% and 25%. This is on by default; pass `table_widths=False` (CLI `--no-table-widths`) to turn it off.
+
+```python
+html = to_xhtml("| a | b |\n|------|--|\n| x | y |\n")
+```
+
+Each width is the separator cell's character count (alignment colons included) over the row's total, truncated to a whole percent. This matches what Pandoc's HTML writer emits, and Pandoc's HTML reader turns it back into column widths. A separator row whose cells are all the same length sets no widths, so the browser lays the table out as usual.
 
 ### Markdown rewriting
 

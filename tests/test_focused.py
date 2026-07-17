@@ -132,3 +132,14 @@ def test_table_ial_line_attaches():
     html = to_xhtml('a|b\n-|-\n1|2\n{: .c}\n')
     assert html.startswith('<table class="c">')
     assert '{: .c}' not in html
+
+def test_table_widths_from_separator_dashes():
+    table = "| a | b |\n|------|--|\n| x | y |\n"
+    html = to_xhtml(table)
+    assert '<table>\n<colgroup>\n<col style="width: 75%" />\n<col style="width: 25%" />\n</colgroup>\n<thead>' in html
+    assert "<colgroup>" not in to_xhtml(table, table_widths=False)
+    html = to_xhtml("| a | b |\n|:---|----:|\n| x | y |\n")
+    assert '<col style="width: 44%" />\n<col style="width: 55%" />' in html
+    assert "<colgroup>" not in to_xhtml("| a | b |\n|---|---|\n| x | y |\n")
+    grid = "+---+----+\n| a | b  |\n+===+====+\n| 1 | 2  |\n+---+----+\n"
+    assert "<colgroup>" not in to_xhtml(grid)

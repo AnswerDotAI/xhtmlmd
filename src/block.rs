@@ -173,6 +173,7 @@ enum DraftBlock {
     Table {
         attrs: Attr,
         aligns: Vec<Align>,
+        widths: Vec<f64>,
         head: Vec<DraftTableRow>,
         rows: Vec<DraftTableRow>,
         foot: Vec<DraftTableRow>,
@@ -305,12 +306,14 @@ fn finalize_block(block: DraftBlock, ctx: &InlineContext<'_>) -> Block {
         DraftBlock::Table {
             attrs,
             aligns,
+            widths,
             head,
             rows,
             foot,
         } => Block::Table {
             attrs,
             aligns,
+            widths,
             head: finalize_table_rows(head, ctx),
             rows: finalize_table_rows(rows, ctx),
             foot: finalize_table_rows(foot, ctx),
@@ -797,6 +800,7 @@ enum BuildKind {
     Table {
         attrs: Attr,
         aligns: Vec<Align>,
+        widths: Vec<f64>,
         head: Vec<DraftTableRow>,
         rows: Vec<DraftTableRow>,
         foot: Vec<DraftTableRow>,
@@ -1307,12 +1311,17 @@ impl<'a> ContainerBuilder<'a> {
         let Some(header) = split_table_row(&header_line) else {
             return false;
         };
-        let Some(aligns) = parse_table_separator(line) else {
+        let Some((aligns, seps)) = parse_table_separator(line) else {
             return false;
         };
         if header.len() != aligns.len() {
             return false;
         }
+        let widths = if self.options.table_widths {
+            separator_widths(&seps)
+        } else {
+            Vec::new()
+        };
         let head = header
             .into_iter()
             .map(|cell| cell.trim().to_string())
@@ -1321,6 +1330,7 @@ impl<'a> ContainerBuilder<'a> {
             attrs: Attr::default(),
             head: vec![draft_inline_table_row(head, &aligns)],
             aligns,
+            widths,
             rows: Vec::new(),
             foot: Vec::new(),
             trim_leading_body_pipe: header_line.trim_start().starts_with('|'),
@@ -2243,6 +2253,7 @@ impl<'a> ContainerBuilder<'a> {
             BuildKind::Table {
                 attrs,
                 aligns,
+                widths,
                 head,
                 rows,
                 foot,
@@ -2250,6 +2261,7 @@ impl<'a> ContainerBuilder<'a> {
             } => vec![DraftBlock::Table {
                 attrs: attrs.clone(),
                 aligns: aligns.clone(),
+                widths: widths.clone(),
                 head: head.clone(),
                 rows: rows.clone(),
                 foot: foot.clone(),
@@ -3632,6 +3644,7 @@ fn parse_grid_table(lines: &[String], parser: &mut Parser, depth: usize) -> Opti
     Some(DraftBlock::Table {
         attrs: Attr::default(),
         aligns,
+        widths: Vec::new(),
         head,
         rows,
         foot,
@@ -3898,9 +3911,10 @@ fn raw_table_cells(line: &str) -> Vec<String> {
     cells
 }
 
-fn parse_table_separator(line: &str) -> Option<Vec<Align>> {
+fn parse_table_separator(line: &str) -> Option<(Vec<Align>, Vec<usize>)> {
     let cells = split_table_row(line)?;
     let mut aligns = Vec::new();
+    let mut lens = Vec::new();
     for cell in cells {
         let c = cell.trim();
         let left = c.starts_with(':');
@@ -3915,8 +3929,17 @@ fn parse_table_separator(line: &str) -> Option<Vec<Align>> {
             (false, true) => Align::Right,
             _ => Align::None,
         });
+        lens.push(c.len());
     }
-    Some(aligns)
+    Some((aligns, lens))
+}
+
+fn separator_widths(lens: &[usize]) -> Vec<f64> {
+    if lens.iter().all(|l| *l == lens[0]) {
+        return Vec::new();
+    }
+    let total: usize = lens.iter().sum();
+    lens.iter().map(|l| *l as f64 / total as f64).collect()
 }
 
 fn paragraph_interrupts(line: &str) -> bool {

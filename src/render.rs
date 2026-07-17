@@ -130,10 +130,11 @@ impl<'a> Renderer<'a> {
             Block::Table {
                 attrs,
                 aligns,
+                widths,
                 head,
                 rows,
                 foot,
-            } => self.table(attrs, aligns, head, rows, foot, out),
+            } => self.table(attrs, aligns, widths, head, rows, foot, out),
             Block::Div { attrs, children } => {
                 out.push_str("<div");
                 attrs_html(attrs, out);
@@ -223,6 +224,7 @@ impl<'a> Renderer<'a> {
         &mut self,
         attrs: &Attr,
         aligns: &[Align],
+        widths: &[f64],
         head: &[TableRow],
         rows: &[TableRow],
         foot: &[TableRow],
@@ -231,6 +233,15 @@ impl<'a> Renderer<'a> {
         out.push_str("<table");
         attrs_html(attrs, out);
         out.push_str(">\n");
+        if !widths.is_empty() {
+            out.push_str("<colgroup>\n");
+            for w in widths {
+                out.push_str("<col style=\"width: ");
+                out.push_str(&((w * 100.0) as u64).to_string());
+                out.push_str("%\" />\n");
+            }
+            out.push_str("</colgroup>\n");
+        }
         if !head.is_empty() {
             out.push_str("<thead>\n");
             for row in head {
