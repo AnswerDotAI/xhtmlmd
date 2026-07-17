@@ -6,6 +6,7 @@ use crate::entity::decode_entities as decode_html_entities;
 use crate::tagfilter::tagfilter_html;
 use crate::{MathMode, Options};
 use std::collections::{HashMap, HashSet};
+use unicode_properties::{GeneralCategoryGroup, UnicodeGeneralCategory};
 use std::ops::Range;
 
 const ESCAPED_AMP: char = '\u{E000}';
@@ -751,11 +752,16 @@ struct Delimiter {
     active: bool,
 }
 
+// Spec "punctuation character": ASCII punctuation or Unicode general category P.
+fn is_flanking_punct(ch: char) -> bool {
+    ch.is_ascii_punctuation() || ch.general_category_group() == GeneralCategoryGroup::Punctuation
+}
+
 fn delimiter_run_flags(ch: char, before: char, after: char) -> (bool, bool) {
     let before_ws = before == '\0' || before.is_whitespace();
     let after_ws = after == '\0' || after.is_whitespace();
-    let before_punct = before.is_ascii_punctuation();
-    let after_punct = after.is_ascii_punctuation();
+    let before_punct = is_flanking_punct(before);
+    let after_punct = is_flanking_punct(after);
     let left = !after_ws && (!after_punct || before_ws || before_punct);
     let right = !before_ws && (!before_punct || after_ws || after_punct);
     match ch {
