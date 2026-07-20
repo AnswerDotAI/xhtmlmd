@@ -1,16 +1,24 @@
 from ._native import to_xhtml as _to_xhtml, blocks as _blocks, edit_nodes as _edit_nodes
 
-__all__ = ["to_xhtml", "render", "blocks", "rewrite"]
+__all__ = ["to_xhtml", "render", "blocks", "rewrite", "sample_md"]
 
 
-def to_xhtml(markdown: str, *, math: str = "brackets", tagfilter: bool = False, balance: bool = False, callbacks: dict | None = None,
+def to_xhtml(markdown: str, *, math: str = "brackets", tagfilter: bool = False, balance: bool = False,
+    auto_ids: bool = True, smart: bool = False, callbacks: dict | None = None,
     max_inline_depth: int | None = None, max_block_depth: int | None = None, max_link_paren_depth: int | None = None) -> str:
     "Render Markdown to an XHTML fragment."
-    return _to_xhtml(markdown, math=math, tagfilter=tagfilter, balance=balance, callbacks=callbacks, max_inline_depth=max_inline_depth,
+    return _to_xhtml(markdown, math=math, tagfilter=tagfilter, balance=balance, auto_ids=auto_ids, smart=smart,
+        callbacks=callbacks, max_inline_depth=max_inline_depth,
         max_block_depth=max_block_depth, max_link_paren_depth=max_link_paren_depth)
 
 
 render = to_xhtml
+
+
+def sample_md() -> str:
+    "The packaged feature-sample Markdown document, exercising the full dialect."
+    from importlib.resources import files
+    return (files("xhtmlmd") / "sample.md").read_text(encoding="utf-8")
 
 
 def blocks(markdown: str, *, math: str = "brackets") -> list[dict]:

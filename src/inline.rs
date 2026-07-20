@@ -1,6 +1,6 @@
 use crate::ast::{Attr, Inline, LinkRef};
 use crate::attrs::{
-    normalize_label, parse_braced_attr, parse_span_ial, scan_link_label, valid_link_label,
+    normalize_label, parse_braced_attr, parse_span_ial, raw_attr, scan_link_label, valid_link_label,
 };
 use crate::entity::decode_entities as decode_html_entities;
 use crate::tagfilter::tagfilter_html;
@@ -253,6 +253,16 @@ fn parse_inner(src: &str, ctx: &InlineContext<'_>, depth: usize) -> Vec<Inline> 
         if starts(src, i, "`") {
             if let Some((item, next)) = code_span(src, i) {
                 scanner.flush_text();
+                if let (Inline::Code { text, .. }, Some((name, n))) =
+                    (&item, raw_attr(&src[next..]))
+                {
+                    scanner.push_inline(Inline::Raw {
+                        format: name.to_string(),
+                        text: text.clone(),
+                    });
+                    i = next + n;
+                    continue;
+                }
                 i = scanner.push_with_attrs(item, next);
                 continue;
             }
@@ -273,6 +283,15 @@ fn parse_inner(src: &str, ctx: &InlineContext<'_>, depth: usize) -> Vec<Inline> 
                     i = scanner.push_with_attrs(item, end + 2);
                     continue;
                 }
+            }
+        }
+        if starts(src, i, "^[") {
+            if let Some((body, next)) = note_span(src, i) {
+                scanner.flush_text();
+                let children = coalesce(parse_inner(&body, ctx, depth + 1));
+                scanner.push_inline(Inline::Note { children });
+                i = next;
+                continue;
             }
         }
         if starts(src, i, "^") {
@@ -551,8 +570,31 @@ impl InlineScanner<'_, '_> {
         }
         let after = close + 1;
         let target_end = self.nodes.len();
-        let resolved = self
-            .resolve_inline_link(opener.image, after)
+        let resolved = self.resolve_inline_link(opener.image, after);
+        if resolved.is_none() && !opener.image {
+            if let Some(item) = ref_item(&self.src[opener.label_start..close]) {
+                for idx in opener.node + 1..target_end {
+                    self.nodes[idx].alive = false;
+                }
+                for delim in self.delimiters.iter_mut() {
+                    if delim.node >= opener.node && delim.node < target_end {
+                        delim.active = false;
+                    }
+                }
+                self.nodes[opener.node] = Node {
+                    inline: item,
+                    alive: true,
+                };
+                self.brackets.pop();
+                for bracket in self.brackets.iter_mut() {
+                    if !bracket.image {
+                        bracket.active = false;
+                    }
+                }
+                return Some(self.apply_trailing_attrs(opener.node, after));
+            }
+        }
+        let resolved = resolved
             .or_else(|| self.resolve_span(opener.image, after))
             .or_else(|| self.resolve_reference_link(opener.image, opener.label_start, close, after))
             .or_else(|| self.resolve_shortcut_link(opener.image, opener.label_start, close, after));
@@ -1014,6 +1056,91 @@ fn following_link_label_blocks_shortcut(src: &str, after: usize) -> bool {
     };
     label.is_empty() || valid_link_label(&label, false)
 }
+
+/// Cross-reference bracket group: `[@id]`, `[-@id]` (bare number), `[Prefix @id]`
+/// (prefix override, single ref only), or `[@a; @b]` groups. Returns the dumb
+/// carrier: a Link with a `data-ref` attr, or a `span.refs` of them for groups.
+fn ref_item(label: &str) -> Option<Inline> {
+    let segs: Vec<&str> = label.split(';').collect();
+    let single = segs.len() == 1;
+    let links = segs
+        .iter()
+        .map(|s| ref_seg(s, single))
+        .collect::<Option<Vec<_>>>()?;
+    if single {
+        links.into_iter().next()
+    } else {
+        let mut attrs = Attr::default();
+        attrs.push_class("refs".to_string());
+        Some(Inline::Span {
+            attrs,
+            children: links,
+        })
+    }
+}
+
+fn ref_seg(seg: &str, allow_prefix: bool) -> Option<Inline> {
+    let seg = seg.trim();
+    let at = seg.find('@')?;
+    let before = &seg[..at];
+    let (before, bare) = match before.strip_suffix('-') {
+        Some(b) => (b, true),
+        None => (before, false),
+    };
+    let prefix = before.trim_end();
+    if !prefix.is_empty() && (!allow_prefix || before.len() == prefix.len()) {
+        return None; // prefix text needs trailing whitespace, and only a lone ref takes one
+    }
+    let id = &seg[at + 1..];
+    let mut chars = id.chars();
+    let valid_start = chars.next().is_some_and(|c| c.is_ascii_alphanumeric());
+    if !valid_start || !chars.all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        return None;
+    }
+    let mut attrs = Attr::default();
+    attrs.set_pair(
+        "data-ref".to_string(),
+        if bare { "bare" } else { "" }.to_string(),
+    );
+    let children = if prefix.is_empty() {
+        Vec::new()
+    } else {
+        vec![Inline::Text(prefix.to_string())]
+    };
+    Some(Inline::Link {
+        attrs,
+        children,
+        url: format!("#{id}"),
+        title: None,
+    })
+}
+
+/// Inline footnote `^[body]` starting at `i`: returns the body and the index
+/// past the closing bracket. Brackets nest; backslash escapes are honored.
+fn note_span(src: &str, i: usize) -> Option<(String, usize)> {
+    let mut depth = 0usize;
+    let mut esc = false;
+    for (off, ch) in src[i + 1..].char_indices() {
+        let pos = i + 1 + off;
+        if esc {
+            esc = false;
+            continue;
+        }
+        match ch {
+            '\\' => esc = true,
+            '[' => depth += 1,
+            ']' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some((src[i + 2..pos].to_string(), pos + 1));
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
 
 fn code_span(src: &str, i: usize) -> Option<(Inline, usize)> {
     let run = count_run(src.as_bytes(), i, b'`');

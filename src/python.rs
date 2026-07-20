@@ -16,6 +16,8 @@ use crate::{MathMode, Options};
     math = "brackets",
     tagfilter = false,
     balance = false,
+    auto_ids = true,
+    smart = false,
     callbacks = None,
     max_inline_depth = None,
     max_block_depth = None,
@@ -26,6 +28,8 @@ fn to_xhtml(
     math: &str,
     tagfilter: bool,
     balance: bool,
+    auto_ids: bool,
+    smart: bool,
     callbacks: Option<Bound<'_, PyDict>>,
     max_inline_depth: Option<usize>,
     max_block_depth: Option<usize>,
@@ -35,6 +39,8 @@ fn to_xhtml(
         math: parse_math_mode(math)?,
         tagfilter,
         balance,
+        auto_ids,
+        smart,
         ..Options::default()
     };
     if let Some(depth) = max_inline_depth {
@@ -211,10 +217,12 @@ fn transform_block(block: &mut Block, callbacks: &Bound<'_, PyDict>) -> PyResult
                 }
             }
         }
+        Block::Figure { image, .. } => transform_inline(image, callbacks)?,
         Block::CodeBlock { .. }
         | Block::Html { .. }
         | Block::ThematicBreak { .. }
-        | Block::Math { .. } => {}
+        | Block::Math { .. }
+        | Block::Raw { .. } => {}
     }
     if let Some(html) = call_block_callback(block, callbacks)? {
         *block = Block::Html { raw: html };
@@ -236,6 +244,7 @@ fn transform_inline(item: &mut Inline, callbacks: &Bound<'_, PyDict>) -> PyResul
         | Inline::Strike { children, .. }
         | Inline::Highlight { children, .. }
         | Inline::Link { children, .. }
+        | Inline::Note { children }
         | Inline::Span { children, .. } => transform_inlines(children, callbacks)?,
         Inline::Image { alt, .. } => transform_inlines(alt, callbacks)?,
         Inline::Text(_)
@@ -248,7 +257,8 @@ fn transform_inline(item: &mut Inline, callbacks: &Bound<'_, PyDict>) -> PyResul
         | Inline::Abbr { .. }
         | Inline::Html(_)
         | Inline::Math { .. }
-        | Inline::FootnoteRef { .. } => {}
+        | Inline::FootnoteRef { .. }
+        | Inline::Raw { .. } => {}
     }
     if let Some(html) = call_inline_callback(item, callbacks)? {
         *item = Inline::Html(html);
@@ -305,6 +315,8 @@ fn block_kind(block: &Block) -> &'static str {
         Block::Table { .. } => "table",
         Block::Div { .. } => "div",
         Block::Math { .. } => "math_block",
+        Block::Raw { .. } => "raw_block",
+        Block::Figure { .. } => "figure",
     }
 }
 
@@ -328,6 +340,8 @@ fn inline_kind(item: &Inline) -> &'static str {
         Inline::Math { .. } => "math_inline",
         Inline::FootnoteRef { .. } => "footnote_ref",
         Inline::Span { .. } => "span",
+        Inline::Note { .. } => "note",
+        Inline::Raw { .. } => "raw_inline",
     }
 }
 
@@ -403,6 +417,7 @@ fn block_node<'py>(py: Python<'py>, block: &Block) -> PyResult<Bound<'py, PyDict
             head,
             rows,
             foot,
+            caption,
         } => {
             set_attrs(&d, attrs)?;
             d.set_item(
@@ -416,6 +431,7 @@ fn block_node<'py>(py: Python<'py>, block: &Block) -> PyResult<Bound<'py, PyDict
             d.set_item("head_rows", head.len())?;
             d.set_item("rows", rows.len())?;
             d.set_item("foot_rows", foot.len())?;
+            d.set_item("caption", plain(caption))?;
         }
         Block::Math {
             attrs,
@@ -425,6 +441,17 @@ fn block_node<'py>(py: Python<'py>, block: &Block) -> PyResult<Bound<'py, PyDict
             set_attrs(&d, attrs)?;
             d.set_item("display", *display)?;
             d.set_item("tex", tex)?;
+        }
+        Block::Raw { format, text } => {
+            d.set_item("format", format)?;
+            d.set_item("text", text)?;
+        }
+        Block::Figure { attrs, image } => {
+            set_attrs(&d, attrs)?;
+            if let Inline::Image { alt, url, .. } = image {
+                d.set_item("alt", plain(alt))?;
+                d.set_item("url", url)?;
+            }
         }
     }
     Ok(d)
@@ -494,6 +521,13 @@ fn inline_node<'py>(py: Python<'py>, item: &Inline) -> PyResult<Bound<'py, PyDic
         }
         Inline::FootnoteRef { label } => {
             d.set_item("label", label)?;
+        }
+        Inline::Note { children } => {
+            d.set_item("children", children.len())?;
+        }
+        Inline::Raw { format, text } => {
+            d.set_item("format", format)?;
+            d.set_item("text", text)?;
         }
     }
     Ok(d)

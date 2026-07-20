@@ -178,6 +178,7 @@ pub enum Block {
         head: Vec<TableRow>,
         rows: Vec<TableRow>,
         foot: Vec<TableRow>,
+        caption: Vec<Inline>,
     },
     Div {
         attrs: Attr,
@@ -187,6 +188,15 @@ pub enum Block {
         attrs: Attr,
         display: bool,
         tex: String,
+    },
+    Figure {
+        attrs: Attr,
+        image: Inline,
+    },
+
+    Raw {
+        format: String,
+        text: String,
     },
 }
 
@@ -203,8 +213,9 @@ impl Block {
             | Block::ThematicBreak { attrs, .. }
             | Block::Table { attrs, .. }
             | Block::Div { attrs, .. }
-            | Block::Math { attrs, .. } => Some(attrs),
-            Block::Html { .. } => None,
+            | Block::Math { attrs, .. }
+            | Block::Figure { attrs, .. } => Some(attrs),
+            Block::Html { .. } | Block::Raw { .. } => None,
         }
     }
 }
@@ -272,9 +283,16 @@ pub enum Inline {
     FootnoteRef {
         label: String,
     },
+    Note {
+        children: Vec<Inline>,
+    },
     Span {
         attrs: Attr,
         children: Vec<Inline>,
+    },
+    Raw {
+        format: String,
+        text: String,
     },
 }
 

@@ -108,7 +108,8 @@ def test_long_nonascii_words_near_autolink_cap_do_not_error():
 def test_attr_gate_requires_marker():
     # Pandoc-style marker-first bodies attach
     assert_html(to_xhtml('# H {#h .c}\n'), '<h1 id="h" class="c">H</h1>')
-    assert_html(to_xhtml('![x](/i.png){width="50%"}\n'), '<p><img src="/i.png" alt="x" width="50%" /></p>')
+    assert_html(to_xhtml('![x](/i.png){width="50%"}\n'),
+                '<figure><img src="/i.png" alt="x" width="50%" /><figcaption>x</figcaption></figure>')
     # kramdown colon forms attach, including pure ALD references
     expected = '<p id="id" class="cls">Some text</p>\n'
     assert_html(to_xhtml('{:note: #id .cls}\n\nSome text\n{:note}\n'), expected)
@@ -138,3 +139,77 @@ def test_table_ial_line_attaches():
     html = to_xhtml('a|b\n-|-\n1|2\n{: .c}\n')
     assert html.startswith('<table class="c">')
     assert '{: .c}' not in html
+
+def test_raw_attribute_blocks_and_inlines():
+    html = to_xhtml('```{=docx}\n<w:br w:type="page"/>\n```\n')
+    assert html == '<script type="text/x-docx">&lt;w:br w:type="page"/&gt;\n</script>\n'
+    html = to_xhtml('a `<w:br/>`{=docx} b')
+    assert html == '<p>a <script type="text/x-docx">&lt;w:br/&gt;</script> b</p>\n'
+    html = to_xhtml('```{=my-fmt_2}\nx\n```\n')  # names: alphanumeric plus - and _
+    assert 'type="text/x-my-fmt_2"' in html
+    # Not raw: empty name, extra info tokens, space before brace, bad name chars
+    assert 'script' not in to_xhtml('```{=}\nx\n```\n')
+    assert 'script' not in to_xhtml('```python {=docx}\nx\n```\n')
+    assert 'script' not in to_xhtml('a `x` {=docx} b')
+    assert 'script' not in to_xhtml('a `x`{=a b} c')
+
+def test_ref_syntax():
+    html = to_xhtml('see [@sec-pay] here')
+    assert '<a href="#sec-pay" data-ref="data-ref"></a>' in html
+    html = to_xhtml('in [-@sec-pay], the')
+    assert '<a href="#sec-pay" data-ref="bare"></a>' in html
+    html = to_xhtml('per [Clause @sec-pay].')
+    assert '<a href="#sec-pay" data-ref="data-ref">Clause</a>' in html
+    html = to_xhtml('the terms in [@sec-a; @sec-b; @sec-c] survive')
+    assert ('<span class="refs"><a href="#sec-a" data-ref="data-ref"></a>'
+            '<a href="#sec-b" data-ref="data-ref"></a>'
+            '<a href="#sec-c" data-ref="data-ref"></a></span>') in html
+    html = to_xhtml('see [-@sec-pay]{ref=page}')
+    assert '<a href="#sec-pay" data-ref="bare" ref="page"></a>' in html
+
+def test_ref_non_matches():
+    assert 'data-ref' not in to_xhtml('mail [user@host] today')     # no space before @
+    assert 'data-ref' not in to_xhtml('odd [@sec x] here')          # id stops at space
+    assert 'data-ref' not in to_xhtml('a [@sec-a; Two @sec-b] b')   # prefix only allowed solo
+    assert '<a href="/u">@sec-x</a>' in to_xhtml('[@sec-x](/u)')    # links win
+    assert '[@]' in to_xhtml('empty [@] ref')
+
+def test_para_attrs_ial_only():
+    assert to_xhtml('text {.x}') == '<p>text {.x}</p>\n'            # same-line para attrs are gone
+    assert to_xhtml('text\n{: .x}') == '<p class="x">text</p>\n'    # glued IAL below binds
+    assert to_xhtml('{: .x}\ntext') == '<p class="x">text</p>\n'    # glued IAL above binds
+    html = to_xhtml('text\n\n{: .x}')                               # isolated IAL is literal
+    assert '<p>{: .x}</p>' in html and 'class' not in html
+    html = to_xhtml('one\n\n{: .x}\n\ntwo')
+    assert '<p>{: .x}</p>' in html and 'class' not in html
+    assert to_xhtml('# H {.x}') == '<h1 id=\"h\" class=\"x\">H</h1>\n'         # headings keep same-line attrs
+
+def test_table_captions():
+    html = to_xhtml('| a |\n|---|\n| 1 |\n: My caption {#tbl-x}')
+    assert '<table id="tbl-x">' in html and '<caption>My caption</caption>' in html
+    html = to_xhtml('+---+\n| a |\n+---+\n: Grid cap *em* {.wide}')
+    assert 'class="wide"' in html and '<caption>Grid cap <em>em</em></caption>' in html
+    assert '<caption>' not in to_xhtml('| a |\n|---|\n\n: Not a caption')   # blank line: no attach
+    assert '<caption>' not in to_xhtml('| a |\n|---|\n::: x\n:::')          # fenced div, not caption
+
+def test_inline_notes():
+    html = to_xhtml('Fact.^[With a *note*.]')
+    assert 'class="footnote-ref"' in html and '<em>note</em>' in html and 'class="footnotes"' in html
+    html = to_xhtml('A.^[one] B.[^x]\n\n[^x]: two')
+    assert html.count('<li id=') == 2
+
+def test_auto_ids():
+    html = to_xhtml('# Hello World\n\n## Hello World\n\n### Fancy: Stuff! {#kept}')
+    assert '<h1 id="hello-world">' in html and '<h2 id="hello-world-1">' in html and '<h3 id="kept">' in html
+    assert 'id=' not in to_xhtml('# Hello', auto_ids=False)
+
+def test_smart_punctuation():
+    html = to_xhtml('"Quotes" --- em -- en ... done. Don\'t touch `--code--`.', smart=True)
+    assert '“Quotes” — em – en … done' in html
+    assert 'Don’t' in html and '--code--' in html
+    assert '--' in to_xhtml('a -- b')   # off by default
+
+def test_implicit_figures():
+    html = to_xhtml('![A cap](i.png){#fig-x .wide}')
+    assert '<figure id="fig-x" class="wide">' in html and '<figcaption>A cap</figcaption>' in html
+    assert '<p>text <img' in to_xhtml('text ![A cap](i.png)')   # not alone: no figure

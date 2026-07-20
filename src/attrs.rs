@@ -88,6 +88,17 @@ pub fn parse_braced_attr(src: &str, defs: &HashMap<String, Attr>) -> Option<(Att
     None
 }
 
+/// A leading Pandoc-style raw attribute `{=format}`: the name is one or more
+/// ASCII alphanumerics, `-`, or `_`. Returns the name and bytes consumed.
+pub fn raw_attr(src: &str) -> Option<(&str, usize)> {
+    let rest = src.strip_prefix("{=")?;
+    let end = rest.find('}')?;
+    let name = &rest[..end];
+    let ok = !name.is_empty()
+        && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+    ok.then_some((name, end + 3))
+}
+
 pub fn parse_span_ial(src: &str, defs: &HashMap<String, Attr>) -> Option<(Attr, usize)> {
     if !src.starts_with("{:") {
         return None;

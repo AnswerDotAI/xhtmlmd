@@ -1,10 +1,10 @@
 use crate::ast::{
-    Align, Attr, Block, Definition, DefinitionItem, Document, Footnote, LinkRef, ListItem,
+    Align, Attr, Block, Definition, DefinitionItem, Document, Footnote, Inline, LinkRef, ListItem,
     TableCellContent, TableCellData, TableRow, TableRowData,
 };
 use crate::attrs::{
     normalize_label, parse_attr_line, parse_braced_attr, parse_fence_info, parse_html_attrs,
-    strip_trailing_attr, valid_link_label, AttrLine,
+    raw_attr, strip_trailing_attr, valid_link_label, AttrLine,
 };
 use crate::entity::decode_entities;
 use crate::inline::{find_edit_nodes, parse_inlines, EditNode, InlineContext};
@@ -176,6 +176,7 @@ enum DraftBlock {
         head: Vec<DraftTableRow>,
         rows: Vec<DraftTableRow>,
         foot: Vec<DraftTableRow>,
+        caption: Option<String>,
     },
     Div {
         attrs: Attr,
@@ -185,6 +186,10 @@ enum DraftBlock {
         attrs: Attr,
         display: bool,
         tex: String,
+    },
+    Raw {
+        format: String,
+        text: String,
     },
 }
 
@@ -202,7 +207,7 @@ impl DraftBlock {
             | DraftBlock::Table { attrs, .. }
             | DraftBlock::Div { attrs, .. }
             | DraftBlock::Math { attrs, .. } => Some(attrs),
-            DraftBlock::Html { .. } => None,
+            DraftBlock::Html { .. } | DraftBlock::Raw { .. } => None,
         }
     }
 }
@@ -226,10 +231,30 @@ fn finalize_blocks(blocks: Vec<DraftBlock>, ctx: &InlineContext<'_>) -> Vec<Bloc
 
 fn finalize_block(block: DraftBlock, ctx: &InlineContext<'_>) -> Block {
     match block {
-        DraftBlock::Paragraph { attrs, text } => Block::Paragraph {
-            attrs,
-            children: parse_inlines(&text, ctx),
-        },
+        DraftBlock::Paragraph { attrs, text } => {
+            let children = parse_inlines(&text, ctx);
+            // Implicit figures, pandoc-style: a paragraph that is exactly one image
+            // becomes a figure, its alt text the caption. The image's id and classes
+            // move to the figure (the referenceable element); other pairs stay put.
+            if let [Inline::Image { .. }] = children.as_slice() {
+                let mut image = children.into_iter().next().unwrap();
+                let mut fattrs = attrs;
+                if let Some(ia) = image.attrs_mut() {
+                    if let Some(id) = ia.id.take() {
+                        fattrs.id.get_or_insert(id);
+                    }
+                    for c in std::mem::take(&mut ia.classes) {
+                        fattrs.push_class(c);
+                    }
+                }
+                Block::Figure {
+                    attrs: fattrs,
+                    image,
+                }
+            } else {
+                Block::Paragraph { attrs, children }
+            }
+        }
         DraftBlock::Heading { level, attrs, text } => Block::Heading {
             level,
             attrs,
@@ -291,6 +316,7 @@ fn finalize_block(block: DraftBlock, ctx: &InlineContext<'_>) -> Block {
             lang,
             text,
         },
+        DraftBlock::Raw { format, text } => Block::Raw { format, text },
         DraftBlock::Html { raw } => Block::Html { raw },
         DraftBlock::HtmlContainer {
             tag,
@@ -308,13 +334,26 @@ fn finalize_block(block: DraftBlock, ctx: &InlineContext<'_>) -> Block {
             head,
             rows,
             foot,
-        } => Block::Table {
-            attrs,
-            aligns,
-            head: finalize_table_rows(head, ctx),
-            rows: finalize_table_rows(rows, ctx),
-            foot: finalize_table_rows(foot, ctx),
-        },
+            caption,
+        } => {
+            let (caption, cattrs) = match caption {
+                Some(cap) => {
+                    let (text, a) = strip_trailing_attr(&cap, ctx.attr_defs);
+                    (parse_inlines(&text, ctx), a)
+                }
+                None => (Vec::new(), Attr::default()),
+            };
+            let mut attrs = attrs;
+            attrs.merge(&cattrs);
+            Block::Table {
+                attrs,
+                aligns,
+                head: finalize_table_rows(head, ctx),
+                rows: finalize_table_rows(rows, ctx),
+                foot: finalize_table_rows(foot, ctx),
+                caption,
+            }
+        }
         DraftBlock::Div { attrs, children } => Block::Div {
             attrs,
             children: finalize_blocks(children, ctx),
@@ -375,10 +414,13 @@ impl Parser {
         let mut blocks = Vec::new();
         let mut spans: Vec<BlockSpan> = Vec::new();
         let mut pending = Attr::default();
+        let mut pending_lines: Vec<usize> = Vec::new();
         let mut pending_start = None;
         let mut last_attr_span: Option<usize> = None;
         while self.i < self.lines.len() {
             if self.line().trim().is_empty() || self.line().trim() == "^" {
+                literalize_pending(&self.lines, &mut blocks, &mut spans,
+                                   &mut pending, &mut pending_lines, &mut pending_start);
                 self.i += 1;
                 continue;
             }
@@ -391,14 +433,21 @@ impl Parser {
                         last_attr_span = None;
                     }
                     AttrLine::Ial(attr) => {
-                        if let Some(last) = blocks.last_mut().and_then(DraftBlock::attrs_mut) {
-                            last.merge(&attr);
-                            if let Some(idx) = last_attr_span {
-                                spans[idx].end = self.i + 1;
+                        // An IAL binds only by adjacency: glued below the previous block or
+                        // above the next; isolated ones fall back to literal text.
+                        let glued = self.i > 0 && !is_sep_line(&self.lines[self.i - 1]);
+                        match blocks.last_mut().and_then(DraftBlock::attrs_mut) {
+                            Some(last) if glued => {
+                                last.merge(&attr);
+                                if let Some(idx) = last_attr_span {
+                                    spans[idx].end = self.i + 1;
+                                }
                             }
-                        } else {
-                            pending.merge(&attr);
-                            pending_start.get_or_insert(self.i);
+                            _ => {
+                                pending.merge(&attr);
+                                pending_lines.push(self.i);
+                                pending_start.get_or_insert(self.i);
+                            }
                         }
                     }
                 }
@@ -422,20 +471,28 @@ impl Parser {
                 continue;
             }
             let mut parsed = self.parse_one(depth);
+            let mut bound = false;
             if !pending.is_empty() {
                 if let Some(dst) = parsed.blocks.first_mut().and_then(DraftBlock::attrs_mut) {
                     dst.merge(&pending);
                     pending = Attr::default();
+                    pending_lines.clear();
+                    bound = true;
                 }
             }
-            if let Some(first) = parsed.spans.first_mut() {
-                if span_kind_accepts_attrs(first.kind) {
-                    if let Some(start) = pending_start.take() {
-                        first.start = start;
+            if bound {
+                if let Some(first) = parsed.spans.first_mut() {
+                    if span_kind_accepts_attrs(first.kind) {
+                        if let Some(start) = pending_start.take() {
+                            first.start = start;
+                        }
                     }
-                } else {
-                    flush_pending(&mut spans, &mut pending_start, first.start);
                 }
+                pending_start = None;
+            } else {
+                // Pending IALs the next block can't absorb are unbound: literal text, in source order.
+                literalize_pending(&self.lines, &mut blocks, &mut spans,
+                                   &mut pending, &mut pending_lines, &mut pending_start);
             }
             last_attr_span = parsed
                 .spans
@@ -445,6 +502,8 @@ impl Parser {
             spans.extend(parsed.spans);
             append_blocks(&mut blocks, parsed.blocks);
         }
+        literalize_pending(&self.lines, &mut blocks, &mut spans,
+                           &mut pending, &mut pending_lines, &mut pending_start);
         if let Some(start) = pending_start {
             spans.push(BlockSpan::plain("attr_def", start, self.i));
         }
@@ -585,6 +644,42 @@ impl BlockSpan {
 
 /// Emit any pending block-IAL lines as their own `attr_def` span ending at
 /// `end`, so a span that can't absorb them never swallows or leapfrogs them.
+/// A glued `: caption` line for the table it directly follows: one colon (not a
+/// fenced-div `:::`), then whitespace, then non-empty caption text.
+fn table_caption_line(line: &str) -> Option<String> {
+    let rest = line.trim_start().strip_prefix(':')?;
+    if rest.starts_with(':') || !rest.starts_with(char::is_whitespace) {
+        return None;
+    }
+    let cap = rest.trim();
+    (!cap.is_empty()).then(|| cap.to_string())
+}
+
+
+fn is_sep_line(line: &str) -> bool {
+    let t = line.trim();
+    t.is_empty() || t == "^"
+}
+
+/// Emit unbound (isolated) block-IAL lines as a literal paragraph: an IAL binds
+/// only by gluing, so one with blank lines on both sides is ordinary text.
+fn literalize_pending(lines: &[String], blocks: &mut Vec<DraftBlock>, spans: &mut Vec<BlockSpan>,
+                      pending: &mut Attr, pending_lines: &mut Vec<usize>, pending_start: &mut Option<usize>) {
+    if pending_lines.is_empty() {
+        return;
+    }
+    let text = pending_lines.iter().map(|i| lines[*i].trim().to_string()).collect::<Vec<_>>().join("\n");
+    blocks.push(DraftBlock::Paragraph {
+        attrs: Attr::default(),
+        text,
+    });
+    spans.push(BlockSpan::plain("paragraph", pending_lines[0], pending_lines.last().unwrap() + 1));
+    *pending = Attr::default();
+    pending_lines.clear();
+    *pending_start = None;
+}
+
+
 fn flush_pending(spans: &mut Vec<BlockSpan>, pending_start: &mut Option<usize>, end: usize) {
     if let Some(start) = pending_start.take() {
         spans.push(BlockSpan::plain("attr_def", start, end));
@@ -801,10 +896,13 @@ enum BuildKind {
         rows: Vec<DraftTableRow>,
         foot: Vec<DraftTableRow>,
         trim_leading_body_pipe: bool,
+        caption: Option<String>,
     },
     GridTable {
         lines: Vec<String>,
         closed: bool,
+        caption: Option<String>,
+        caption_open: bool,
     },
 }
 
@@ -1319,6 +1417,7 @@ impl<'a> ContainerBuilder<'a> {
             .collect();
         let table = BuildKind::Table {
             attrs: Attr::default(),
+            caption: None,
             head: vec![draft_inline_table_row(head, &aligns)],
             aligns,
             rows: Vec::new(),
@@ -1349,11 +1448,19 @@ impl<'a> ContainerBuilder<'a> {
             aligns,
             rows,
             trim_leading_body_pipe,
+            caption,
             ..
         } = &mut self.nodes[last].kind
         else {
             return false;
         };
+        if caption.is_none() {
+            if let Some(cap) = table_caption_line(line) {
+                *caption = Some(cap);
+                self.leaf_open = false;
+                return true;
+            }
+        }
         if line.trim().is_empty() || (starts_block(line) && !line.contains('|')) {
             return false;
         }
@@ -1889,11 +1996,27 @@ impl<'a> ContainerBuilder<'a> {
         self.open_node(BuildKind::GridTable {
             lines: vec![line],
             closed: false,
+            caption: None,
+            caption_open: false,
         });
         true
     }
 
     fn feed_open_grid_table(&mut self, line: &str, next_line: Option<&str>) -> bool {
+        // One glued line after the closing border may be a `: caption`.
+        if let Some(idx) = self.last_child() {
+            if let BuildKind::GridTable { closed: true, caption_open: caption_open @ true, caption, .. } =
+                &mut self.nodes[idx].kind
+            {
+                *caption_open = false;
+                if caption.is_none() {
+                    if let Some(cap) = table_caption_line(line) {
+                        *caption = Some(cap);
+                        return true;
+                    }
+                }
+            }
+        }
         let Some(idx) = self.open_grid_table_idx() else {
             return false;
         };
@@ -1903,9 +2026,10 @@ impl<'a> ContainerBuilder<'a> {
                 Some(next) => !next.starts_with('|') && !is_grid_border_line(&next),
                 None => true,
             };
-        if let BuildKind::GridTable { lines, closed } = &mut self.nodes[idx].kind {
+        if let BuildKind::GridTable { lines, closed, caption_open, .. } = &mut self.nodes[idx].kind {
             lines.push(line);
             *closed = closes;
+            *caption_open = closes;
         }
         self.leaf_open = !closes;
         true
@@ -1922,6 +2046,11 @@ impl<'a> ContainerBuilder<'a> {
 
     fn mark_blank(&mut self) {
         self.pending_blank_items.clear();
+        if let Some(idx) = self.last_child() {
+            if let BuildKind::GridTable { caption_open, .. } = &mut self.nodes[idx].kind {
+                *caption_open = false;
+            }
+        }
         if let Some(idx) = self.current_definition_definition() {
             mark_definition_blank(&mut self.nodes[idx].kind);
         }
@@ -2197,6 +2326,15 @@ impl<'a> ContainerBuilder<'a> {
                 }]
             }
             BuildKind::FencedCode { info, text, .. } => {
+                let trimmed = info.trim();
+                if let Some((name, n)) = raw_attr(trimmed) {
+                    if n == trimmed.len() {
+                        return vec![DraftBlock::Raw {
+                            format: name.to_string(),
+                            text: text.clone(),
+                        }];
+                    }
+                }
                 let (info, lang, attrs) = parse_fence_info(info, &parser.attr_defs);
                 vec![DraftBlock::CodeBlock {
                     attrs,
@@ -2232,8 +2370,13 @@ impl<'a> ContainerBuilder<'a> {
                     raw.clone()
                 },
             }],
-            BuildKind::GridTable { lines, .. } => parse_grid_table(lines, parser, depth)
-                .map(|table| vec![table])
+            BuildKind::GridTable { lines, caption, .. } => parse_grid_table(lines, parser, depth)
+                .map(|mut table| {
+                    if let DraftBlock::Table { caption: c, .. } = &mut table {
+                        *c = caption.clone();
+                    }
+                    vec![table]
+                })
                 .unwrap_or_else(|| {
                     vec![DraftBlock::Paragraph {
                         attrs: Attr::default(),
@@ -2246,6 +2389,7 @@ impl<'a> ContainerBuilder<'a> {
                 head,
                 rows,
                 foot,
+                caption,
                 ..
             } => vec![DraftBlock::Table {
                 attrs: attrs.clone(),
@@ -2253,6 +2397,7 @@ impl<'a> ContainerBuilder<'a> {
                 head: head.clone(),
                 rows: rows.clone(),
                 foot: foot.clone(),
+                caption: caption.clone(),
             }],
         }
     }
@@ -2299,19 +2444,31 @@ impl<'a> ContainerBuilder<'a> {
         if i >= lines.len() {
             return Vec::new();
         }
-        let joined = lines[i..]
+        // Trailing colon-marked IAL lines (`{: ...}`) glued under the paragraph bind to it;
+        // that is the only paragraph attribute position (no same-line trailing lists).
+        let mut end = lines.len();
+        let mut ials = Vec::new();
+        while end > i + 1 {
+            match parse_attr_line(lines[end - 1].trim(), &parser.attr_defs) {
+                Some(AttrLine::Ial(a)) => {
+                    ials.push(a);
+                    end -= 1;
+                }
+                _ => break,
+            }
+        }
+        let mut attrs = Attr::default();
+        for a in ials.iter().rev() {
+            attrs.merge(a);
+        }
+        let joined = lines[i..end]
             .iter()
             .map(|line| line.trim_start())
             .collect::<Vec<_>>()
             .join("\n")
             .trim_end()
             .to_string();
-        let (text, attrs) = if has_block_trailing_attr(&joined) {
-            strip_trailing_attr(&joined, &parser.attr_defs)
-        } else {
-            (joined, Attr::default())
-        };
-        vec![DraftBlock::Paragraph { attrs, text }]
+        vec![DraftBlock::Paragraph { attrs, text: joined }]
     }
 
     fn finish_list_item(
@@ -2661,20 +2818,6 @@ fn scan_link_ref_title(s: &str) -> Option<(String, usize)> {
         i += ch.len_utf8();
     }
     None
-}
-
-fn has_block_trailing_attr(s: &str) -> bool {
-    let trimmed = s.trim_end();
-    if !trimmed.ends_with('}') {
-        return false;
-    }
-    let Some(open) = trimmed.rfind('{') else {
-        return false;
-    };
-    trimmed[..open]
-        .chars()
-        .next_back()
-        .is_some_and(char::is_whitespace)
 }
 
 fn unescape_backslash_punctuation(s: &str) -> String {
@@ -3631,6 +3774,7 @@ fn parse_grid_table(lines: &[String], parser: &mut Parser, depth: usize) -> Opti
     }
     Some(DraftBlock::Table {
         attrs: Attr::default(),
+        caption: None,
         aligns,
         head,
         rows,

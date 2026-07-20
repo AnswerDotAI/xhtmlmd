@@ -10,7 +10,7 @@ def assert_html(actual, expected): assert normalize_html(actual) == normalize_ht
 
 
 def test_to_xhtml_renders_markdown():
-    assert_html(to_xhtml("# Hello"), "<h1>Hello</h1>")
+    assert_html(to_xhtml("# Hello"), "<h1 id=\"hello\">Hello</h1>")
 
 
 def test_render_alias(): assert_html(render("*hi*"), "<p><em>hi</em></p>")
@@ -47,7 +47,7 @@ def test_node_callback_can_override_heading():
     assert_html(to_xhtml("# Hello", callbacks={"heading": heading}), '<h1 data-hook="yes">Hooked</h1>')
     assert len(calls) == 1
     assert calls[0][:2] == ("heading", 1)
-    assert_html(calls[0][2], "<h1>Hello</h1>")
+    assert_html(calls[0][2], "<h1 id=\"hello\">Hello</h1>")
 
 
 def test_node_callback_can_override_inline_code():
@@ -217,7 +217,7 @@ def test_rewrite_unicode_component_edits():
 
 def test_cli_reads_markdown_from_stdin():
     res = subprocess.run(["xhtmlmd"], input="# Hello\n", text=True, capture_output=True, check=True)
-    assert_html(res.stdout, "<h1>Hello</h1>")
+    assert_html(res.stdout, "<h1 id=\"hello\">Hello</h1>")
     assert res.stderr == ""
 
 

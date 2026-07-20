@@ -19,6 +19,11 @@ xhtmlmd is largely implemented using AI, except for the tests. The tests are lar
 - Footnotes: `[^id]` references to defined `[^id]:` definitions with indented continuation blocks.
 - Abbreviations: `*[HTML]: Hyper Text Markup Language` definitions render matching text as `<abbr>`.
 - Fenced divs: Pandoc/Quarto/Djot-style `:::` containers with attributes or a single class word.
+- Raw passthrough: a Pandoc-style raw attribute names the format a payload is written for. A fenced code block whose info string is exactly `{=name}`, or inline code followed immediately by `{=name}`, renders as `<script type="text/x-name">` with the payload entity-escaped. The parser never inspects the name or the payload; each downstream converter documents which names it consumes and ignores the rest.
+- Cross-references: Quarto-style bracketed references to identified elements. `[@sec-pay]` renders as `<a data-ref="data-ref" href="#sec-pay"></a>`, a symbolic carrier each converter resolves its own way (a number, a Word REF field, a link); `[-@sec-pay]` marks it bare (`data-ref="bare"`, no prefix word), `[Clause @sec-pay]` carries override text, and `[@sec-a; @sec-b]` groups references in a `span.refs`. A trailing attribute list attaches as usual, e.g. `[-@sec-pay]{ref=page}`. The bracket group must contain only reference items (prefix text needs a space before the `@`, and ids are letters, digits, `-`, `_`), it loses to explicit link syntax such as `[@sec-x](url)`, and anything that doesn't match stays ordinary text, so `[user@host]` is untouched. The parser never resolves numbers or checks that targets exist.
+- Table captions and figures: a `: caption {attrs}` line glued directly under a table's last row captions it (attrs apply to the table; Quarto's caption format, glued-only and after-only in ours), and a paragraph that is exactly one image becomes a `<figure>` with the alt text as `<figcaption>` (pandoc's implicit figures; the image's id and classes move to the figure).
+- Inline footnotes: pandoc-style `^[an inline note]`, numbered together with `[^id]` references.
+- Smart punctuation (opt-in `smart=True`): `---` and `--` to em and en dashes, `...` to an ellipsis, and quote curling, in text only; code, math, and raw payloads are untouched.
 
 ## Attributes
 
@@ -28,12 +33,12 @@ ALDs (attribute list definitions) are kramdown's named bundles. `{:note: #id .cl
 
 Attribute lists attach to:
 
-- Headings, ATX and setext: `# Head {#h}`.
-- Paragraphs: a trailing list at the end of the last line.
+- Headings, ATX and setext: `# Head {#h}`. Headings without an explicit id get a pandoc-style one derived from their text (lowercased, punctuation dropped, spaces to hyphens, `-1` suffixes on duplicates); pass `auto_ids=False` to disable.
 - Fenced code: in the info string, `python {.numberLines}` after the opening fence.
 - Fenced divs: in the `:::` opener.
+- Tables: a trailing list on the glued `: caption` line applies to the table.
 - Link reference definitions: `[r]: /url "title" {.external}` applies the attributes to every link resolved through that reference.
-- Any block, via a standalone IAL line `{: ...}`: it modifies the preceding block, including directly after the last row of a table; with no preceding block it applies to the next one.
+- Any block, via a standalone IAL line `{: ...}`. IALs bind by adjacency: glued directly under a block (including the last row of a table) they modify it, glued directly above a block they modify that one, and an isolated IAL with blank lines on both sides is literal text. This is also the only way to attribute a paragraph; a brace group at the end of a paragraph's own text is always literal.
 - Inline constructs, when the list follows immediately with no space: spans `[x]{.c}`, links, images, code spans, emphasis, strong, strikethrough, superscript, subscript, highlight, and math.
 
 Raw HTML blocks take no attribute lists; write attributes in the HTML itself.

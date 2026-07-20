@@ -25,6 +25,7 @@ struct Renderer<'a> {
     footnote_nums: HashMap<String, usize>,
     footnote_order: Vec<String>,
     footnote_ref_counts: HashMap<String, usize>,
+    note_bodies: HashMap<String, Vec<Inline>>,
 }
 
 impl<'a> Renderer<'a> {
@@ -34,6 +35,7 @@ impl<'a> Renderer<'a> {
             footnote_nums: HashMap::new(),
             footnote_order: Vec::new(),
             footnote_ref_counts: HashMap::new(),
+            note_bodies: HashMap::new(),
         }
     }
 
@@ -107,6 +109,13 @@ impl<'a> Renderer<'a> {
                 escape_text(text, out);
                 out.push_str(CODE_BLOCK_CLOSE);
             }
+            Block::Raw { format, text } => {
+                out.push_str("<script type=\"text/x-");
+                escape_attr(format, out);
+                out.push_str("\">");
+                escape_text(text, out);
+                out.push_str("</script>\n");
+            }
             Block::Html { raw } => out.push_str(raw),
             Block::HtmlContainer {
                 tag,
@@ -133,7 +142,22 @@ impl<'a> Renderer<'a> {
                 head,
                 rows,
                 foot,
-            } => self.table(attrs, aligns, head, rows, foot, out),
+                caption,
+            } => self.table(attrs, aligns, head, rows, foot, caption, out),
+            Block::Figure { attrs, image } => {
+                out.push_str("<figure");
+                attrs_html(attrs, out);
+                out.push_str(">\n");
+                self.inlines(std::slice::from_ref(image), out);
+                if let Inline::Image { alt, .. } = image {
+                    if !alt.is_empty() {
+                        out.push_str("\n<figcaption>");
+                        self.inlines(alt, out);
+                        out.push_str("</figcaption>");
+                    }
+                }
+                out.push_str("\n</figure>\n");
+            }
             Block::Div { attrs, children } => {
                 out.push_str("<div");
                 attrs_html(attrs, out);
@@ -226,11 +250,17 @@ impl<'a> Renderer<'a> {
         head: &[TableRow],
         rows: &[TableRow],
         foot: &[TableRow],
+        caption: &[Inline],
         out: &mut String,
     ) {
         out.push_str("<table");
         attrs_html(attrs, out);
         out.push_str(">\n");
+        if !caption.is_empty() {
+            out.push_str("<caption>");
+            self.inlines(caption, out);
+            out.push_str("</caption>\n");
+        }
         if !head.is_empty() {
             out.push_str("<thead>\n");
             for row in head {
@@ -367,6 +397,13 @@ impl<'a> Renderer<'a> {
                 escape_text(text, out);
                 out.push_str("</code>");
             }
+            Inline::Raw { format, text } => {
+                out.push_str("<script type=\"text/x-");
+                escape_attr(format, out);
+                out.push_str("\">");
+                escape_text(text, out);
+                out.push_str("</script>");
+            }
             Inline::Link {
                 attrs,
                 children,
@@ -435,6 +472,11 @@ impl<'a> Renderer<'a> {
                 out.push_str("</span>");
             }
             Inline::FootnoteRef { label } => self.footnote_ref(label, out),
+            Inline::Note { children } => {
+                let label = format!("__note{}", self.note_bodies.len() + 1);
+                self.note_bodies.insert(label.clone(), children.clone());
+                self.footnote_ref(&label, out);
+            }
             Inline::Span { attrs, children } => {
                 out.push_str("<span");
                 attrs_html(attrs, out);
@@ -488,6 +530,10 @@ impl<'a> Renderer<'a> {
             let mut body = String::new();
             if let Some(def) = defs.get(label.as_str()) {
                 self.blocks(&def.blocks, &mut body);
+            } else if let Some(items) = self.note_bodies.get(&label).cloned() {
+                body.push_str("<p>");
+                self.inlines(&items, &mut body);
+                body.push_str("</p>\n");
             }
             bodies.push((label, body));
         }
@@ -615,6 +661,8 @@ pub(crate) fn plain(items: &[Inline]) -> String {
             Inline::Autolink { text, .. } => out.push_str(text),
             Inline::Abbr { text, .. } => out.push_str(text),
             Inline::FootnoteRef { label } => out.push_str(label),
+            Inline::Note { children, .. } => out.push_str(&plain(children)),
+            Inline::Raw { .. } => {}
         }
     }
     out

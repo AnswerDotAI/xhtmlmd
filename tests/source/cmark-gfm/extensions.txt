@@ -628,7 +628,10 @@ http://🍄.ga/ http://x🍄.ga/
 <p>Underscores not allowed in host name www.xxx._yyy.zzz</p>
 <p>Underscores allowed in domain name <a href="http://www._xxx.yyy.zzz">www._xxx.yyy.zzz</a></p>
 <p><strong>Autolink and <a href="http://inlines">http://inlines</a></strong></p>
-<p><img src="http://inline.com/image" alt="http://inline.com/image" /></p>
+<figure>
+<img src="http://inline.com/image" alt="http://inline.com/image" />
+<figcaption>http://inline.com/image</figcaption>
+</figure>
 <p><a href="mailto:a.w@b.c">a.w@b.c</a></p>
 <p>Full stop outside parens shouldn't be included <a href="http://google.com/ok">http://google.com/ok</a>.</p>
 <p>(Full stop inside parens shouldn't be included <a href="http://google.com/ok">http://google.com/ok</a>.)</p>
