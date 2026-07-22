@@ -8,8 +8,8 @@ from justhtml import Element, Text
 
 from ._html import parse_mdhtml
 
-try: from fastpylight import highlight, highlight_spans, languages
-except ImportError: highlight = highlight_spans = languages = None
+try: from fastpylight import highlight, highlight_spans
+except ImportError: highlight = highlight_spans = None
 
 __all__ = ["SCHEMES", "REFTYPES", "ref_tokens", "ref_variant", "decode_raw", "group_plan", "HeadingNums", "Resolver", "to_html", "math_js"]
 
@@ -331,16 +331,18 @@ class _Exporter(Resolver):
         if self.hl_lang and (new := self.hl_lang(text, lang)) != lang:
             lang = new
             if lang: code.attrs["class"] = f"language-{lang}"
-        if self.hl and highlight_spans and lang is not None and lang in languages():
-            if self.hl == "spans":
-                frag = parse_mdhtml(highlight_spans(text, lang))
-                _set_children(code, list(frag.children[0].children[0].children))
-            else:
-                frag = parse_mdhtml(highlight(text, lang))
-                hlc = _mk("hl-code", {"toks": frag.children[0].attrs.get("toks")})
-                pre.parent.replace_child(hlc, pre)
-                hlc.append_child(pre)
-                pre = hlc
+        if self.hl and highlight_spans and lang is not None:
+            try:
+                if self.hl == "spans":
+                    frag = parse_mdhtml(highlight_spans(text, lang))
+                    _set_children(code, list(frag.children[0].children[0].children))
+                else:
+                    frag = parse_mdhtml(highlight(text, lang))
+                    hlc = _mk("hl-code", {"toks": frag.children[0].attrs.get("toks")})
+                    pre.parent.replace_child(hlc, pre)
+                    hlc.append_child(pre)
+                    pre = hlc
+            except ValueError: pass
         if self.code_wrap and (repl := self.code_wrap(pre.to_html(pretty=False), lang, text)) is not None:
             pre.parent.replace_child(parse_mdhtml(repl), pre)
 

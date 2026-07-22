@@ -130,6 +130,11 @@ def test_code_hooks():
     assert '<div class="copy-wrap"><pre>' in h
     assert '<pre class="mermaid">graph TD</pre>' in h and 'language-mermaid' not in h
 
+def test_hl_lang_alias():
+    h = to_html(to_mdhtml('```py\n1+1\n```\n\n```nosuchlang\nx\n```\n'))
+    assert '<span class="hl-number">1</span>' in h                # alias resolved by the highlighter
+    assert '<code class="language-nosuchlang">x\n</code>' in h  # unknown language left unhighlighted
+
 def test_refs_ids():
     src = to_mdhtml('# A {#sec-a}\n\nSee [@sec-a], [Clause @sec-b], [-@sec-a], and [@fig-e; @sec-nope].\n\n![E](e.png){#fig-e}\n',
         implicit_figures=True)
