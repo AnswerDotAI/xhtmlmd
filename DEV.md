@@ -2,10 +2,10 @@
 
 ## Prerequisites
 
-- Rust toolchain
+- Rust 1.91+
 - Python 3.10+
 - maturin
-- fastship>=0.0.11, installed by `pip install -e '.[dev]'`
+- Development dependencies, installed by `pip install -e '.[dev]'`
 
 ## Building
 
@@ -15,22 +15,40 @@ For local development, build and install the extension into your environment:
 maturin develop
 ```
 
-`ship-rs-build` builds the distributable wheel. The `xhtmlmd` command is a Python console script (`python/xhtmlmd/__main__.py`) over the `to_xhtml` API; there is no separate Rust binary.
+`ship-rs-build` builds the distributable wheel. The `mdhtml` command is a Python console script (`python/mdhtml/__main__.py`) over the `to_mdhtml` API; there is no separate Rust binary.
 
 ## Testing
 
 ```bash
+cargo fmt
+cargo check
+cargo test
 pytest -q
+chkstyle python/mdhtml tests tools/gen_docs.py
+python tools/gen_docs.py --check
 ```
 
-All tests are Python (`tests/`), run against the built extension; there are no `cargo test` unit tests.
+The Python tests in `tests/` exercise the built native extension and the JustHTML boundary. There are currently no Rust-only tests; `cargo test` still compiles the native and documentation test targets.
 
 ## Docs
 
 ```bash
 python tools/gen_docs.py
-python tools/gen_docs.py --check
 ```
+
+## HTML tree
+
+Rust renders provisional markup and does no HTML parsing. `python/mdhtml/__init__.py` sends that markup through `parse_mdhtml`; `python/mdhtml/_html.py` owns the JustHTML configuration and integration patches. The README describes the public API and `docs/DIALECT.md` defines the resulting DOM contract.
+
+`python/mdhtml/_html.py` contains temporary copies of fixes submitted as JustHTML PRs #68, #69, #70, and #71. Remove each patch when the minimum JustHTML version includes it.
+
+## Render callbacks
+
+Callbacks transform children before their enclosing block. Image alt inlines are plain attribute data and are not traversed by inline callbacks. An implicit `Figure` stores a caption copied from the image alt, so caption callbacks run once and image replacement cannot erase Figure semantics. Before transforming the image, the Python bridge snapshots the Figure's source metadata; after transforming it, the bridge adds its standalone `content_html` and rendered `caption_html` before invoking the Figure callback.
+
+## Template tokens
+
+Configured template tokens are recognized by `src/template.rs`. The block parser isolates whole-line `auto` and `block` tokens before inline parsing; the inline scanner handles `auto` and `inline` tokens elsewhere. Both become `TemplateToken` AST nodes and render as escaped text in an HTML template carrier. Python validates the public `TemplateDelimiter` objects and passes compact tuples to the native extension.
 
 ## Source rewriting
 

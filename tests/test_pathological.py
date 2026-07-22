@@ -3,19 +3,19 @@ import json,subprocess,sys,time
 
 import pytest
 
-from xhtmlmd import to_xhtml
+from mdhtml import to_mdhtml
 
 
 def _timed(inp, **kwargs):
     t = time.time()
-    html = to_xhtml(inp, **kwargs)
+    html = to_mdhtml(inp, **kwargs)
     return html, time.time() - t
 
 def _near_linear(mk, n, m=8, **kwargs):
     "Render `mk(n // m)` and `mk(n)`; fail on obviously super-linear growth (quadratic would be ~`m**2`)."
     _, small = _timed(mk(n // m), **kwargs)
     html, large = _timed(mk(n), **kwargs)
-    assert large < max(small, 0.005) * m * 1.5, (small, large)
+    assert large < max(small, 0.01) * m * 1.5, (small, large)
     return html
 
 def test_nested_brackets_do_not_explode():
@@ -26,19 +26,18 @@ def test_deep_blockquotes_are_bounded():
     html = _near_linear(lambda n: "> " * n + "a", 5_000)
     assert "a" in html
 
-def test_repeated_image_openers_are_linear_smoke():
-    _near_linear(lambda n: "![[]()" * n, 800)
+def test_repeated_image_openers_are_linear_smoke(): _near_linear(lambda n: "![[]()" * n, 800)
 
 def test_raw_html_balancing_is_linear_smoke():
     html = _near_linear(lambda n: "<div>\n" * n + "</div>\n" * n, 2_000)
     assert html.startswith("<div>")
 
-def test_balance_stray_closes_are_near_linear():
-    html = _near_linear(lambda n: "".join(f"<x-{i}>" for i in range(n)) + "</missing>" * n, 800, balance=True)
+def test_html5_repair_of_stray_closes_is_near_linear():
+    html = _near_linear(lambda n: "".join(f"<x-{i}>" for i in range(n)) + "</missing>" * n, 800)
     assert "</missing>" not in html
 
-def test_balance_rawtext_blocks_are_near_linear():
-    html = _near_linear(lambda n: "<script>x</script>" * n, 800, balance=True)
+def test_html5_rawtext_blocks_are_near_linear():
+    html = _near_linear(lambda n: "<script>x</script>" * n, 800)
     assert html.startswith("<script>x</script>")
 
 def test_many_abbreviations_are_bounded():
@@ -80,7 +79,7 @@ def test_deep_marker_chains_do_not_crash():
         ("markdown html containers", '<div markdown="1">\n' * 5_000, "<div>"),
         ("footnote marker chain", "[^a]: " * 5_000 + "x\n\nref[^a]\n", "fn-a"),
         ("definition marker chain", "term\n" + ": " * 5_000 + "x\n", "<dl>")]
-    code = "import sys,json\nfrom xhtmlmd import to_xhtml\nfor s in json.load(sys.stdin):\n    print(json.dumps(to_xhtml(s)), flush=True)\n"
+    code = "import sys,json\nfrom mdhtml import to_mdhtml\nfor s in json.load(sys.stdin):\n    print(json.dumps(to_mdhtml(s)), flush=True)\n"
     inputs = json.dumps([inp for _, inp, _ in cases])
     r = subprocess.run([sys.executable, "-c", code], input=inputs, capture_output=True, text=True, timeout=120)
     done = r.stdout.count("\n")

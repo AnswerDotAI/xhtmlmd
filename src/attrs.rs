@@ -95,7 +95,9 @@ pub fn raw_attr(src: &str) -> Option<(&str, usize)> {
     let end = rest.find('}')?;
     let name = &rest[..end];
     let ok = !name.is_empty()
-        && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
     ok.then_some((name, end + 3))
 }
 
@@ -238,10 +240,10 @@ pub fn parse_fence_info(
         let mut dot_rest = rest;
         if let Some(brace) = token.find('{') {
             let first = &token[..brace];
-            if !first.is_empty() {
-                if let Some(a) = parse_synthetic_attrs(first, defs) {
-                    dot_attr.merge(&a);
-                }
+            if !first.is_empty()
+                && let Some(a) = parse_synthetic_attrs(first, defs)
+            {
+                dot_attr.merge(&a);
             }
             if let Some((a, n)) = parse_braced_attr(&token[brace..], defs) {
                 dot_attr.merge(&a);
@@ -423,8 +425,7 @@ fn looks_like_attrs(body: &str, had_colon: bool) -> bool {
     }
     b.starts_with('#')
         || b.starts_with('.')
-        || b
-            .split_whitespace()
+        || b.split_whitespace()
             .next()
             .and_then(|t| t.find('='))
             .is_some_and(|pos| pos > 0)

@@ -1,15 +1,16 @@
 [package]
-name = "xhtmlmd"
+name = "mdhtml"
 version = "0.1.13"
-edition = "2021"
+edition = "2024"
+rust-version = "1.91"
 license = "MIT OR Apache-2.0"
-description = "A bounded-time, Pandoc-leaning Markdown parser with GFM, Extra/kramdown, math, fenced divs, and XHTML output."
-repository = "https://github.com/AnswerDotAI/xhtmlmd"
-homepage = "https://github.com/AnswerDotAI/xhtmlmd"
-documentation = "https://github.com/AnswerDotAI/xhtmlmd"
+description = "A bounded-time, Pandoc-leaning Markdown parser with GFM, Extra/kramdown, math, fenced divs, and MDHTML output."
+repository = "https://github.com/AnswerDotAI/mdhtml"
+homepage = "https://github.com/AnswerDotAI/mdhtml"
+documentation = "https://github.com/AnswerDotAI/mdhtml"
 
 [lib]
-name = "xhtmlmd"
+name = "mdhtml"
 path = "src/lib.rs"
 crate-type = ["cdylib", "rlib"]
 

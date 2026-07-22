@@ -1,0 +1,105 @@
+from collections.abc import Iterable
+from dataclasses import dataclass
+
+from ._html import parse_mdhtml
+from ._native import blocks as _blocks, edit_nodes as _edit_nodes, to_mdhtml as _to_mdhtml
+from .export import _normalize_offsets, math_js, to_html
+from .md import to_md
+
+__all__ = ["TemplateDelimiter", "parse_mdhtml", "to_dom", "to_mdhtml", "render", "blocks", "rewrite", "sample_md", "to_html", "to_md", "math_js"]
+
+
+@dataclass(frozen=True)
+class TemplateDelimiter:
+    "A template token syntax preserved as an inert MDHTML `template` element."
+    syntax: str
+    open: str
+    close: str
+    balance: tuple[str, str] | None = None
+    form: str = "auto"
+
+    def __post_init__(self):
+        if not isinstance(self.syntax, str) or not self.syntax: raise ValueError("template syntax must be a non-empty string")
+        if not isinstance(self.open, str) or not self.open: raise ValueError("template open delimiter must be a non-empty string")
+        if not isinstance(self.close, str) or not self.close: raise ValueError("template close delimiter must be a non-empty string")
+        if self.form not in {"auto", "inline", "block"}: raise ValueError("template form must be 'auto', 'inline', or 'block'")
+        if self.balance is not None:
+            if not isinstance(self.balance, tuple) or len(self.balance) != 2 or any(not isinstance(x, str) or len(x) != 1 for x in self.balance):
+                raise ValueError("template balance must be a pair of single characters")
+            if self.balance[0] == self.balance[1]: raise ValueError("template balance characters must differ")
+
+
+def _template_args(templates):
+    if templates is None: return None
+    templates = list(templates)
+    if any(not isinstance(x, TemplateDelimiter) for x in templates): raise TypeError("templates must contain TemplateDelimiter objects")
+    opens = [x.open for x in templates]
+    if len(opens) != len(set(opens)): raise ValueError("each template opening delimiter must be unique")
+    return [(x.syntax, x.open, x.close, x.balance, x.form) for x in templates]
+
+
+def to_dom(markdown: str, *, math: str = "brackets", tagfilter: bool = False, bare_autolinks: bool = True, auto_ids: bool = False,
+    implicit_figures: bool = False, smart: bool = False, templates: Iterable[TemplateDelimiter] | None = None,
+    callbacks: dict | None = None, max_inline_depth: int | None = None,
+    max_block_depth: int | None = None, max_link_paren_depth: int | None = None):
+    "Render Markdown into a mutable JustHTML DOM."
+    source = _to_mdhtml(markdown, math=math, tagfilter=tagfilter, bare_autolinks=bare_autolinks, auto_ids=auto_ids,
+        implicit_figures=implicit_figures, smart=smart, templates=_template_args(templates), callbacks=callbacks,
+        max_inline_depth=max_inline_depth, max_block_depth=max_block_depth, max_link_paren_depth=max_link_paren_depth)
+    return parse_mdhtml(source)
+
+
+def to_mdhtml(markdown: str, *, math: str = "brackets", tagfilter: bool = False, bare_autolinks: bool = True, auto_ids: bool = False,
+    implicit_figures: bool = False, smart: bool = False, templates: Iterable[TemplateDelimiter] | None = None,
+    callbacks: dict | None = None, max_inline_depth: int | None = None,
+    max_block_depth: int | None = None, max_link_paren_depth: int | None = None) -> str:
+    "Render Markdown to an MDHTML fragment."
+    return to_dom(markdown, math=math, tagfilter=tagfilter, bare_autolinks=bare_autolinks, auto_ids=auto_ids,
+        implicit_figures=implicit_figures, smart=smart, templates=templates, callbacks=callbacks,
+        max_inline_depth=max_inline_depth, max_block_depth=max_block_depth, max_link_paren_depth=max_link_paren_depth).to_html(pretty=False)
+
+
+render = to_mdhtml
+
+
+def sample_md() -> str:
+    "The packaged feature-sample Markdown document, exercising the full dialect."
+    from importlib.resources import files
+    return (files("mdhtml") / "sample.md").read_text(encoding="utf-8")
+
+
+def blocks(markdown: str, *, math: str = "brackets", implicit_figures: bool = False,
+    templates: Iterable[TemplateDelimiter] | None = None) -> list[dict]:
+    "Top-level source spans, using the same Figure and template-token promotion as rendering."
+    return _blocks(markdown, math=math, implicit_figures=implicit_figures, templates=_template_args(templates))
+
+
+def rewrite(markdown: str, callbacks: dict, *, math: str = "brackets") -> str:
+    "Rewrite recognized Markdown constructs while preserving all other source text."
+    normalized, offsets = _normalize_offsets(markdown)
+    edits = []
+    for raw in _edit_nodes(normalized, math=math):
+        norm_start, norm_end = raw["start"], raw["end"]
+        start, end = offsets[norm_start], offsets[norm_end]
+        internal = {k: raw.pop(k) for k in tuple(raw) if k.startswith("_")}
+        raw.update(source=markdown[start:end], start=start, end=end)
+        callback = callbacks.get(raw["type"])
+        if callback is None: continue
+        replacement = callback(raw)
+        if replacement is None: continue
+        if isinstance(replacement, str):
+            edits.append((start, end, replacement))
+            continue
+        if not isinstance(replacement, dict): raise TypeError(f"{raw['type']} callback must return None, str, or dict")
+        allowed = {"url"} if raw["type"] == "image" else {"tex"}
+        unknown = replacement.keys() - allowed
+        if unknown: raise ValueError(f"unknown {raw['type'].replace('_inline', '')} replacement field: {sorted(unknown)[0]}")
+        if any(not isinstance(value, str) for value in replacement.values()):
+            raise TypeError(f"{raw['type']} replacement fields must be strings")
+        if raw["type"] == "image" and "url" in replacement:
+            edits.append((offsets[internal["_url_start"]], offsets[internal["_url_end"]], replacement["url"]))
+        if raw["type"] == "math_inline" and "tex" in replacement:
+            n = len(raw["delimiter"])
+            edits.append((offsets[norm_start + n], offsets[norm_end - n], replacement["tex"]))
+    for start, end, replacement in reversed(edits): markdown = markdown[:start] + replacement + markdown[end:]
+    return markdown

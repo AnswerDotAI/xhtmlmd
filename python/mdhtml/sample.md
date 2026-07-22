@@ -1,6 +1,6 @@
-# xhtmlmd feature sample
+# mdhtml feature sample
 
-This page is written as a tour of the Markdown features supported by xhtmlmd.
+This page is written as a tour of the Markdown features supported by mdhtml.
 Each section starts with the Markdown source, then shows the same source rendered.
 
 ## Headings, paragraphs, and inline formatting
@@ -62,7 +62,7 @@ Angle links work too: <https://example.com/spec>.
   - Keep them readable
 
 1. Parse the Markdown
-2. Render XHTML
+2. Render MDHTML
 3. Add a stylesheet
 
 - [x] Tables
@@ -76,7 +76,7 @@ Angle links work too: <https://example.com/spec>.
   - Keep them readable
 
 1. Parse the Markdown
-2. Render XHTML
+2. Render MDHTML
 3. Add a stylesheet
 
 - [x] Tables
@@ -143,7 +143,7 @@ Inline code uses backticks, as in `Options::default()`.
 
 ``` rust {#example-code .numberLines startFrom="10"}
 fn main() {
-    println!("hello from xhtmlmd");
+    println!("hello from mdhtml");
 }
 ```
 
@@ -154,7 +154,7 @@ Inline code uses backticks, as in `Options::default()`.
 
 ``` rust {#example-code .numberLines startFrom="10"}
 fn main() {
-    println!("hello from xhtmlmd");
+    println!("hello from mdhtml");
 }
 ```
 
@@ -215,8 +215,8 @@ Code spans can have attributes: `render()`{.api-call}.
 ## Definition lists
 
 `````markdown
-xhtmlmd
-: A Markdown parser that renders XHTML fragments.
+mdhtml
+: A Markdown parser that renders MDHTML fragments.
 
 brackets math
 : Math mode that recognizes `\(...\)`, `\[...\]`, and `$$...$$`.
@@ -228,8 +228,8 @@ fenced div
 : A Pandoc-style block container opened with colons.
 `````
 
-xhtmlmd
-: A Markdown parser that renders XHTML fragments.
+mdhtml
+: A Markdown parser that renders MDHTML fragments.
 
 brackets math
 : Math mode that recognizes `\(...\)`, `\[...\]`, and `$$...$$`.
@@ -326,8 +326,8 @@ They can contain normal **Markdown**.
 
 ## Captions and figures
 
-A paragraph that is exactly one image becomes a figure, with the alt text as its
-caption. A `: caption` line glued directly under a table captions the table, and
+A paragraph that is exactly one image becomes a figure when `implicit_figures=True`,
+with the alt text as its caption. A `: caption` line glued directly under a table captions the table, and
 its trailing attribute list applies to the table:
 
 `````markdown
@@ -377,21 +377,6 @@ See also [@fig-diagram] and [-@tbl-stages], or the mixed pair
 page [-@sec-late]{ref=page}, paragraph [-@sec-late]{ref=leaf} of
 [-@sec-late]{ref=rel}.
 
-## Inline footnotes and smart punctuation
-
-An inline footnote needs no separate definition, and with `smart=True` the
-punctuation below renders as en and em dashes, an ellipsis, and curled quotes:
-
-`````markdown
-A quick aside.^[Inline footnotes hold arbitrary *inline* Markdown.]
-
-"Well" --- pages 12--14, or "maybe" more...
-`````
-
-A quick aside.^[Inline footnotes hold arbitrary *inline* Markdown.]
-
-"Well" --- pages 12--14, or "maybe" more...
-
 ## Raw passthrough
 
 A fenced block whose info string is `{=name}`, or inline code followed by
@@ -407,3 +392,17 @@ everyone else drops it:
 ```{=docx}
 <w:p><w:r><w:br w:type="page"/></w:r></w:p>
 ```
+## Inline footnotes and smart punctuation
+
+An inline footnote needs no separate definition, and with `smart=True` the
+punctuation below renders as en and em dashes, an ellipsis, and curled quotes:
+
+`````markdown
+A quick aside.^[Inline footnotes hold arbitrary *inline* Markdown.]
+
+"Well" --- pages 12--14, or "maybe" more...
+`````
+
+A quick aside.^[Inline footnotes hold arbitrary *inline* Markdown.]
+
+"Well" --- pages 12--14, or "maybe" more...

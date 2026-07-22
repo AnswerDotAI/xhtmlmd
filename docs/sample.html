@@ -1,5 +1,5 @@
-<h1 id="xhtmlmd-feature-sample">xhtmlmd feature sample</h1>
-<p>This page is written as a tour of the Markdown features supported by xhtmlmd.
+<h1 id="mdhtml-feature-sample">mdhtml feature sample</h1>
+<p>This page is written as a tour of the Markdown features supported by mdhtml.
 Each section starts with the Markdown source, then shows the same source rendered.</p>
 <h2 id="headings-paragraphs-and-inline-formatting">Headings, paragraphs, and inline formatting</h2>
 <pre><code class="language-markdown">### Project notes {#project-notes .section-title}
@@ -34,7 +34,7 @@ with attributes.</p>
 <p>Bare links such as <a href="https://example.org/docs">https://example.org/docs</a> are linked automatically.
 Angle links work too: <a href="https://example.com/spec">https://example.com/spec</a>.</p>
 <figure class="thumbnail">
-<img src="https://dummyimage.com/96x48/eeeeee/333333.png&amp;text=demo" alt="A small placeholder image" width="96" height="48" />
+<img src="https://dummyimage.com/96x48/eeeeee/333333.png&amp;text=demo" alt width="96" height="48">
 <figcaption>A small placeholder image</figcaption>
 </figure>
 <h2 id="lists-and-tasks">Lists and tasks</h2>
@@ -44,7 +44,7 @@ Angle links work too: <a href="https://example.com/spec">https://example.com/spe
   - Keep them readable
 
 1. Parse the Markdown
-2. Render XHTML
+2. Render MDHTML
 3. Add a stylesheet
 
 - [x] Tables
@@ -62,13 +62,13 @@ Angle links work too: <a href="https://example.com/spec">https://example.com/spe
 </ul>
 <ol>
 <li>Parse the Markdown</li>
-<li>Render XHTML</li>
+<li>Render MDHTML</li>
 <li>Add a stylesheet</li>
 </ol>
 <ul class="task-list">
-<li><input type="checkbox" disabled="disabled" checked="checked" /> Tables</li>
-<li><input type="checkbox" disabled="disabled" checked="checked" /> Footnotes</li>
-<li><input type="checkbox" disabled="disabled" /> Final polish</li>
+<li><input type="checkbox" disabled checked> Tables</li>
+<li><input type="checkbox" disabled checked> Footnotes</li>
+<li><input type="checkbox" disabled> Final polish</li>
 </ul>
 <h2 id="block-quotes-and-rules">Block quotes and rules</h2>
 <pre><code class="language-markdown">&gt; A block quote can contain normal inline Markdown.
@@ -126,15 +126,15 @@ Angle links work too: <a href="https://example.com/spec">https://example.com/spe
 
 ``` rust {#example-code .numberLines startFrom="10"}
 fn main() {
-    println!("hello from xhtmlmd");
+    println!("hello from mdhtml");
 }
 ```
 
     let indented_code = true;
 </code></pre>
 <p>Inline code uses backticks, as in <code>Options::default()</code>.</p>
-<pre id="example-code" class="rust numberLines" startFrom="10"><code class="language-rust">fn main() {
-    println!("hello from xhtmlmd");
+<pre id="example-code" class="rust numberLines" startfrom="10"><code class="language-rust">fn main() {
+    println!("hello from mdhtml");
 }
 </code></pre>
 <pre><code>let indented_code = true;
@@ -172,8 +172,8 @@ Code spans can have attributes: `render()`{.api-call}.
 <p>Bracketed spans work too: <span class="small important">small but important</span>.
 Code spans can have attributes: <code class="api-call">render()</code>.</p>
 <h2 id="definition-lists">Definition lists</h2>
-<pre><code class="language-markdown">xhtmlmd
-: A Markdown parser that renders XHTML fragments.
+<pre><code class="language-markdown">mdhtml
+: A Markdown parser that renders MDHTML fragments.
 
 brackets math
 : Math mode that recognizes `\(...\)`, `\[...\]`, and `$$...$$`.
@@ -185,8 +185,8 @@ fenced div
 : A Pandoc-style block container opened with colons.
 </code></pre>
 <dl>
-<dt>xhtmlmd</dt>
-<dd>A Markdown parser that renders XHTML fragments.</dd>
+<dt>mdhtml</dt>
+<dd>A Markdown parser that renders MDHTML fragments.</dd>
 <dt>brackets math</dt>
 <dd>Math mode that recognizes <code>\(...\)</code>, <code>\[...\]</code>, and <code>$$...$$</code>.</dd>
 <dt>on math</dt>
@@ -252,8 +252,8 @@ They can contain normal <strong>Markdown</strong>.</p>
 </ul>
 </div>
 <h2 id="captions-and-figures">Captions and figures</h2>
-<p>A paragraph that is exactly one image becomes a figure, with the alt text as its
-caption. A <code>: caption</code> line glued directly under a table captions the table, and
+<p>A paragraph that is exactly one image becomes a figure when <code>implicit_figures=True</code>,
+with the alt text as its caption. A <code>: caption</code> line glued directly under a table captions the table, and
 its trailing attribute list applies to the table:</p>
 <pre><code class="language-markdown">![A labeled diagram](https://dummyimage.com/96x48/eeeeee/333333.png&amp;text=fig){#fig-diagram}
 
@@ -264,7 +264,7 @@ its trailing attribute list applies to the table:</p>
 : Delivery stages {#tbl-stages}
 </code></pre>
 <figure id="fig-diagram">
-<img src="https://dummyimage.com/96x48/eeeeee/333333.png&amp;text=fig" alt="A labeled diagram" />
+<img src="https://dummyimage.com/96x48/eeeeee/333333.png&amp;text=fig" alt>
 <figcaption>A labeled diagram</figcaption>
 </figure>
 <table id="tbl-stages">
@@ -293,12 +293,22 @@ page [-@sec-late]{ref=page}, paragraph [-@sec-late]{ref=leaf} of
 </code></pre>
 <h3 id="sec-payment">Payment terms</h3>
 <h4 id="sec-late">Late fees</h4>
-<p>Interest accrues per <a href="#sec-late" data-ref="data-ref"></a>, within <a href="#sec-payment" data-ref="bare"></a>, as set out in
-<a href="#sec-late" data-ref="data-ref">Clause</a>. The terms in <span class="refs"><a href="#sec-payment" data-ref="data-ref"></a><a href="#sec-late" data-ref="data-ref"></a></span> survive termination.
-See also <a href="#fig-diagram" data-ref="data-ref"></a> and <a href="#tbl-stages" data-ref="bare"></a>, or the mixed pair
-<span class="refs"><a href="#fig-diagram" data-ref="data-ref"></a><a href="#tbl-stages" data-ref="data-ref"></a></span>. Variants: the <a href="#sec-late" data-ref="bare" ref="text"></a> clause, on
-page <a href="#sec-late" data-ref="bare" ref="page"></a>, paragraph <a href="#sec-late" data-ref="bare" ref="leaf"></a> of
-<a href="#sec-late" data-ref="bare" ref="rel"></a>.</p>
+<p>Interest accrues per <a href="#sec-late" data-ref></a>, within <a href="#sec-payment" data-ref="bare"></a>, as set out in
+<a href="#sec-late" data-ref>Clause</a>. The terms in <span data-refs><a href="#sec-payment" data-ref></a><a href="#sec-late" data-ref></a></span> survive termination.
+See also <a href="#fig-diagram" data-ref></a> and <a href="#tbl-stages" data-ref="bare"></a>, or the mixed pair
+<span data-refs><a href="#fig-diagram" data-ref></a><a href="#tbl-stages" data-ref></a></span>. Variants: the <a href="#sec-late" data-ref="bare text"></a> clause, on
+page <a href="#sec-late" data-ref="bare page"></a>, paragraph <a href="#sec-late" data-ref="bare leaf"></a> of
+<a href="#sec-late" data-ref="bare rel"></a>.</p>
+<h2 id="raw-passthrough">Raw passthrough</h2>
+<p>A fenced block whose info string is <code>{=name}</code>, or inline code followed by
+<code>{=name}</code>, passes through for the converter that understands that format;
+everyone else drops it:</p>
+<pre><code class="language-markdown">```{=docx}
+&lt;w:p&gt;&lt;w:r&gt;&lt;w:br w:type="page"/&gt;&lt;/w:r&gt;&lt;/w:p&gt;
+```
+</code></pre>
+<script type="application/vnd.mdhtml.raw" data-format="docx"><w:p><w:r><w:br w:type="page"/></w:r></w:p>
+</script>
 <h2 id="inline-footnotes-and-smart-punctuation">Inline footnotes and smart punctuation</h2>
 <p>An inline footnote needs no separate definition, and with <code>smart=True</code> the
 punctuation below renders as en and em dashes, an ellipsis, and curled quotes:</p>
@@ -308,17 +318,7 @@ punctuation below renders as en and em dashes, an ellipsis, and curled quotes:</
 </code></pre>
 <p>A quick aside.<sup id="fnref-__note1"><a href="#fn-__note1" class="footnote-ref" role="doc-noteref">2</a></sup></p>
 <p>"Well" --- pages 12--14, or "maybe" more...</p>
-<h2 id="raw-passthrough">Raw passthrough</h2>
-<p>A fenced block whose info string is <code>{=name}</code>, or inline code followed by
-<code>{=name}</code>, passes through for the converter that understands that format;
-everyone else drops it:</p>
-<pre><code class="language-markdown">```{=docx}
-&lt;w:p&gt;&lt;w:r&gt;&lt;w:br w:type="page"/&gt;&lt;/w:r&gt;&lt;/w:p&gt;
-```
-</code></pre>
-<script type="text/x-docx">&lt;w:p&gt;&lt;w:r&gt;&lt;w:br w:type="page"/&gt;&lt;/w:r&gt;&lt;/w:p&gt;
-</script>
-</div>
+
 <section class="footnotes" role="doc-endnotes">
 <ol>
 <li id="fn-sample-note">

@@ -26,7 +26,9 @@ pub fn apply(doc: &mut Document) {
 fn opening_context(prev: Option<char>) -> bool {
     match prev {
         None => true,
-        Some(c) => c.is_whitespace() || matches!(c, '(' | '[' | '{' | '-' | '\u{2013}' | '\u{2014}'),
+        Some(c) => {
+            c.is_whitespace() || matches!(c, '(' | '[' | '{' | '-' | '\u{2013}' | '\u{2014}')
+        }
     }
 }
 
@@ -51,11 +53,19 @@ fn smarten(text: &str) -> String {
                 i += 3;
             }
             '"' => {
-                out.push(if opening_context(prev) { '\u{201C}' } else { '\u{201D}' });
+                out.push(if opening_context(prev) {
+                    '\u{201C}'
+                } else {
+                    '\u{201D}'
+                });
                 i += 1;
             }
             '\'' => {
-                out.push(if opening_context(prev) { '\u{2018}' } else { '\u{2019}' });
+                out.push(if opening_context(prev) {
+                    '\u{2018}'
+                } else {
+                    '\u{2019}'
+                });
                 i += 1;
             }
             c => {
@@ -93,10 +103,18 @@ fn walk_blocks(blocks: &mut [Block], f: &mut impl FnMut(&mut Vec<Inline>)) {
                 }
             }
             Block::Table {
-                head, rows, foot, caption, ..
+                head,
+                rows,
+                foot,
+                caption,
+                ..
             } => {
                 walk_inlines(caption, f);
-                for row in head.iter_mut().chain(rows.iter_mut()).chain(foot.iter_mut()) {
+                for row in head
+                    .iter_mut()
+                    .chain(rows.iter_mut())
+                    .chain(foot.iter_mut())
+                {
                     for cell in &mut row.cells {
                         match &mut cell.content {
                             TableCellContent::Inline(items) => walk_inlines(items, f),
@@ -105,7 +123,8 @@ fn walk_blocks(blocks: &mut [Block], f: &mut impl FnMut(&mut Vec<Inline>)) {
                     }
                 }
             }
-            Block::Figure { image, .. } => {
+            Block::Figure { caption, image, .. } => {
+                walk_inlines(caption, f);
                 if let Inline::Image { alt, .. } = image {
                     walk_inlines(alt, f);
                 }

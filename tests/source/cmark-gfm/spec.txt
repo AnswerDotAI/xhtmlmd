@@ -8137,10 +8137,7 @@ However, links may not contain other links, at any level of nesting.
 ```````````````````````````````` example
 ![[[foo](uri1)](uri2)](uri3)
 .
-<figure>
-<img src="uri3" alt="[foo](uri2)" />
-<figcaption>[<a href="uri1">foo</a>](uri2)</figcaption>
-</figure>
+<p><img src="uri3" alt="[foo](uri2)" /></p>
 ````````````````````````````````
 
 
@@ -8780,10 +8777,7 @@ this is standardly used as the image's `alt` attribute.
 ```````````````````````````````` example
 ![foo](/url "title")
 .
-<figure>
-<img src="/url" alt="foo" title="title" />
-<figcaption>foo</figcaption>
-</figure>
+<p><img src="/url" alt="foo" title="title" /></p>
 ````````````````````````````````
 
 
@@ -8792,30 +8786,21 @@ this is standardly used as the image's `alt` attribute.
 
 [foo *bar*]: train.jpg "train & tracks"
 .
-<figure>
-<img src="train.jpg" alt="foo bar" title="train &amp; tracks" />
-<figcaption>foo <em>bar</em></figcaption>
-</figure>
+<p><img src="train.jpg" alt="foo bar" title="train &amp; tracks" /></p>
 ````````````````````````````````
 
 
 ```````````````````````````````` example
 ![foo ![bar](/url)](/url2)
 .
-<figure>
-<img src="/url2" alt="foo bar" />
-<figcaption>foo <img src="/url" alt="bar" /></figcaption>
-</figure>
+<p><img src="/url2" alt="foo bar" /></p>
 ````````````````````````````````
 
 
 ```````````````````````````````` example
 ![foo [bar](/url)](/url2)
 .
-<figure>
-<img src="/url2" alt="foo bar" />
-<figcaption>foo <a href="/url">bar</a></figcaption>
-</figure>
+<p><img src="/url2" alt="foo bar" /></p>
 ````````````````````````````````
 
 
@@ -8831,10 +8816,7 @@ content is rendered, without formatting.
 
 [foo *bar*]: train.jpg "train & tracks"
 .
-<figure>
-<img src="train.jpg" alt="foo bar" title="train &amp; tracks" />
-<figcaption>foo <em>bar</em></figcaption>
-</figure>
+<p><img src="train.jpg" alt="foo bar" title="train &amp; tracks" /></p>
 ````````````````````````````````
 
 
@@ -8843,20 +8825,14 @@ content is rendered, without formatting.
 
 [FOOBAR]: train.jpg "train & tracks"
 .
-<figure>
-<img src="train.jpg" alt="foo bar" title="train &amp; tracks" />
-<figcaption>foo <em>bar</em></figcaption>
-</figure>
+<p><img src="train.jpg" alt="foo bar" title="train &amp; tracks" /></p>
 ````````````````````````````````
 
 
 ```````````````````````````````` example
 ![foo](train.jpg)
 .
-<figure>
-<img src="train.jpg" alt="foo" />
-<figcaption>foo</figcaption>
-</figure>
+<p><img src="train.jpg" alt="foo" /></p>
 ````````````````````````````````
 
 
@@ -8870,19 +8846,14 @@ My ![foo bar](/path/to/train.jpg  "title"   )
 ```````````````````````````````` example
 ![foo](<url>)
 .
-<figure>
-<img src="url" alt="foo" />
-<figcaption>foo</figcaption>
-</figure>
+<p><img src="url" alt="foo" /></p>
 ````````````````````````````````
 
 
 ```````````````````````````````` example
 ![](/url)
 .
-<figure>
-<img src="/url" alt="" />
-</figure>
+<p><img src="/url" alt="" /></p>
 ````````````````````````````````
 
 
@@ -8893,10 +8864,7 @@ Reference-style:
 
 [bar]: /url
 .
-<figure>
-<img src="/url" alt="foo" />
-<figcaption>foo</figcaption>
-</figure>
+<p><img src="/url" alt="foo" /></p>
 ````````````````````````````````
 
 
@@ -8905,10 +8873,7 @@ Reference-style:
 
 [BAR]: /url
 .
-<figure>
-<img src="/url" alt="foo" />
-<figcaption>foo</figcaption>
-</figure>
+<p><img src="/url" alt="foo" /></p>
 ````````````````````````````````
 
 
@@ -8919,10 +8884,7 @@ Collapsed:
 
 [foo]: /url "title"
 .
-<figure>
-<img src="/url" alt="foo" title="title" />
-<figcaption>foo</figcaption>
-</figure>
+<p><img src="/url" alt="foo" title="title" /></p>
 ````````````````````````````````
 
 
@@ -8931,10 +8893,7 @@ Collapsed:
 
 [*foo* bar]: /url "title"
 .
-<figure>
-<img src="/url" alt="foo bar" title="title" />
-<figcaption><em>foo</em> bar</figcaption>
-</figure>
+<p><img src="/url" alt="foo bar" title="title" /></p>
 ````````````````````````````````
 
 
@@ -8945,10 +8904,7 @@ The labels are case-insensitive:
 
 [foo]: /url "title"
 .
-<figure>
-<img src="/url" alt="Foo" title="title" />
-<figcaption>Foo</figcaption>
-</figure>
+<p><img src="/url" alt="Foo" title="title" /></p>
 ````````````````````````````````
 
 
@@ -8973,10 +8929,7 @@ Shortcut:
 
 [foo]: /url "title"
 .
-<figure>
-<img src="/url" alt="foo" title="title" />
-<figcaption>foo</figcaption>
-</figure>
+<p><img src="/url" alt="foo" title="title" /></p>
 ````````````````````````````````
 
 
@@ -8985,10 +8938,7 @@ Shortcut:
 
 [*foo* bar]: /url "title"
 .
-<figure>
-<img src="/url" alt="foo bar" title="title" />
-<figcaption><em>foo</em> bar</figcaption>
-</figure>
+<p><img src="/url" alt="foo bar" title="title" /></p>
 ````````````````````````````````
 
 
@@ -9011,10 +8961,7 @@ The link labels are case-insensitive:
 
 [foo]: /url "title"
 .
-<figure>
-<img src="/url" alt="Foo" title="title" />
-<figcaption>Foo</figcaption>
-</figure>
+<p><img src="/url" alt="Foo" title="title" /></p>
 ````````````````````````````````
 
 

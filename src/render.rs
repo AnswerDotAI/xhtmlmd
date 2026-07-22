@@ -3,7 +3,7 @@ use crate::ast::{
 };
 use std::collections::HashMap;
 
-pub fn to_xhtml_document(doc: &Document) -> String {
+pub(crate) fn render_document(doc: &Document) -> String {
     let mut r = Renderer::new(doc);
     let mut out = String::new();
     r.blocks(&doc.blocks, &mut out);
@@ -12,7 +12,7 @@ pub fn to_xhtml_document(doc: &Document) -> String {
 }
 
 #[allow(dead_code)]
-pub fn to_xhtml_inlines(items: &[Inline]) -> String {
+pub(crate) fn render_inlines(items: &[Inline]) -> String {
     let doc = Document::default();
     let mut r = Renderer::new(&doc);
     let mut out = String::new();
@@ -110,11 +110,13 @@ impl<'a> Renderer<'a> {
                 out.push_str(CODE_BLOCK_CLOSE);
             }
             Block::Raw { format, text } => {
-                out.push_str("<script type=\"text/x-");
-                escape_attr(format, out);
-                out.push_str("\">");
-                escape_text(text, out);
+                raw_data_open(format, text, out);
+                raw_data_text(text, out);
                 out.push_str("</script>\n");
+            }
+            Block::TemplateToken { syntax, body, .. } => {
+                template_html(syntax, body, out);
+                out.push('\n');
             }
             Block::Html { raw } => out.push_str(raw),
             Block::HtmlContainer {
@@ -144,17 +146,23 @@ impl<'a> Renderer<'a> {
                 foot,
                 caption,
             } => self.table(attrs, aligns, head, rows, foot, caption, out),
-            Block::Figure { attrs, image } => {
+            Block::Figure {
+                attrs,
+                caption,
+                image,
+            } => {
                 out.push_str("<figure");
                 attrs_html(attrs, out);
                 out.push_str(">\n");
-                self.inlines(std::slice::from_ref(image), out);
-                if let Inline::Image { alt, .. } = image {
-                    if !alt.is_empty() {
-                        out.push_str("\n<figcaption>");
-                        self.inlines(alt, out);
-                        out.push_str("</figcaption>");
-                    }
+                let mut rendered_image = image.clone();
+                if let Inline::Image { alt, .. } = &mut rendered_image {
+                    alt.clear();
+                }
+                self.inlines(std::slice::from_ref(&rendered_image), out);
+                if !caption.is_empty() {
+                    out.push_str("\n<figcaption>");
+                    self.inlines(caption, out);
+                    out.push_str("</figcaption>");
                 }
                 out.push_str("\n</figure>\n");
             }
@@ -233,11 +241,11 @@ impl<'a> Renderer<'a> {
     }
 
     fn tight_definition(&mut self, blocks: &[Block], out: &mut String) {
-        if let [Block::Paragraph { attrs, children }] = blocks {
-            if attrs.is_empty() {
-                self.inlines(children, out);
-                return;
-            }
+        if let [Block::Paragraph { attrs, children }] = blocks
+            && attrs.is_empty()
+        {
+            self.inlines(children, out);
+            return;
         }
         out.push('\n');
         self.blocks(blocks, out);
@@ -398,12 +406,11 @@ impl<'a> Renderer<'a> {
                 out.push_str("</code>");
             }
             Inline::Raw { format, text } => {
-                out.push_str("<script type=\"text/x-");
-                escape_attr(format, out);
-                out.push_str("\">");
-                escape_text(text, out);
+                raw_data_open(format, text, out);
+                raw_data_text(text, out);
                 out.push_str("</script>");
             }
+            Inline::TemplateToken { syntax, body, .. } => template_html(syntax, body, out),
             Inline::Link {
                 attrs,
                 children,
@@ -620,7 +627,7 @@ pub fn attrs_html(attr: &Attr, out: &mut String) {
         out.push(' ');
         out.push_str(k);
         out.push_str("=\"");
-        escape_attr(if v.is_empty() { k } else { v }, out);
+        escape_attr(v, out);
         out.push('"');
     }
 }
@@ -646,6 +653,7 @@ pub(crate) fn plain(items: &[Inline]) -> String {
     for item in items {
         match item {
             Inline::Text(s) | Inline::Html(s) => out.push_str(s),
+            Inline::TemplateToken { source, .. } => out.push_str(source),
             Inline::SoftBreak | Inline::HardBreak => out.push(' '),
             Inline::Emph { children, .. }
             | Inline::Strong { children, .. }
@@ -668,6 +676,14 @@ pub(crate) fn plain(items: &[Inline]) -> String {
     out
 }
 
+fn template_html(syntax: &str, body: &str, out: &mut String) {
+    out.push_str("<template data-template=\"");
+    escape_attr(syntax, out);
+    out.push_str("\">");
+    escape_text(body, out);
+    out.push_str("</template>");
+}
+
 fn escape_text(s: &str, out: &mut String) {
     for ch in s.chars() {
         match ch {
@@ -677,6 +693,33 @@ fn escape_text(s: &str, out: &mut String) {
             _ => out.push(ch),
         }
     }
+}
+
+fn raw_data_open(format: &str, text: &str, out: &mut String) {
+    out.push_str("<script type=\"application/vnd.mdhtml.raw\" data-format=\"");
+    escape_attr(format, out);
+    out.push('"');
+    if raw_data_needs_encoding(text) {
+        out.push_str(" data-encoding=\"html\"");
+    }
+    out.push('>');
+}
+
+fn raw_data_text(text: &str, out: &mut String) {
+    if raw_data_needs_encoding(text) {
+        escape_text(text, out);
+    } else {
+        out.push_str(text);
+    }
+}
+
+fn raw_data_needs_encoding(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    text.contains("<!--")
+        || bytes.windows(7).any(|s| s.eq_ignore_ascii_case(b"<script"))
+        || bytes
+            .windows(8)
+            .any(|s| s.eq_ignore_ascii_case(b"</script"))
 }
 fn escape_attr(s: &str, out: &mut String) {
     for ch in s.chars() {

@@ -2,9 +2,11 @@
 from pathlib import Path
 
 import pytest
-from bs4 import BeautifulSoup, CData, Comment, Doctype, NavigableString, ProcessingInstruction, Tag
 
-from xhtmlmd import to_xhtml
+from justhtml import Comment, Element, JustHTML, Text
+from justhtml.parser import FragmentContext
+from justhtml.serializer.html import _serialize_comment_data
+from mdhtml import to_mdhtml
 
 SOURCE = Path(__file__).parent / "source"
 FENCE = "`" * 32
@@ -91,7 +93,7 @@ def _norm_attr_value(name, value):
 
 def _norm_text_edges(children, parent_is_block, in_pre):
     if in_pre: return
-    is_block = [c[0] == "el" and c[1] in BLOCK_TAGS for c in children]
+    is_block = [c[0] == "el" and c[1].rsplit("}", 1)[-1] in BLOCK_TAGS for c in children]
     last = len(children) - 1
     for i, c in enumerate(children):
         if c[0] != "text": continue
@@ -101,30 +103,30 @@ def _norm_text_edges(children, parent_is_block, in_pre):
         c[1] = text
     children[:] = [c for c in children if not (c[0] == "text" and c[1] == "")]
 
+def _norm_text(text, in_pre):
+    if text is None: return None
+    text = text if in_pre else _collapse_ws(text)
+    return ["text", text] if text else None
+
+def _norm_children(node, in_pre): return [norm for norm in (_norm_node(child, in_pre) for child in node.children) if norm is not None]
+
 def _norm_node(node, in_pre):
-    if isinstance(node, (Doctype,)): return ["doctype", str(node)]
-    if isinstance(node, Comment): return ["comment", str(node)]
-    if isinstance(node, (ProcessingInstruction, CData)): return None
-    if isinstance(node, NavigableString):
-        text = str(node) if in_pre else _collapse_ws(str(node))
-        return ["text", text] if text else None
-    if isinstance(node, Tag):
-        tag = node.name
-        nxt = in_pre or tag == "pre"
-        attrs = []
-        for k, v in node.attrs.items():
-            val = " ".join(v) if isinstance(v, list) else ("" if v is None else str(v))
-            attrs.append((k, _norm_attr_value(k, val)))
-        attrs.sort()
-        children = [n for n in (_norm_node(c, nxt) for c in node.children) if n is not None]
-        _norm_text_edges(children, tag in BLOCK_TAGS, nxt)
-        return ["el", tag, attrs, children]
-    return None
+    if isinstance(node, Text): return _norm_text(node.data, in_pre)
+    if isinstance(node, Comment): return ["comment", _serialize_comment_data(node.data)]
+    if not isinstance(node, Element): return None
+    tag = node.name
+    nxt = in_pre or tag == "pre"
+    attrs = [(key, _norm_attr_value(key, value)) for key, value in node.attrs.items()]
+    attrs.sort()
+    children = _norm_children(node, nxt)
+    _norm_text_edges(children, tag in BLOCK_TAGS, nxt)
+    return ["el", f"{{{node.namespace}}}{tag}" if node.namespace else tag, attrs, children]
+
+def parse_html(s): return JustHTML(s, fragment_context=FragmentContext('body'), sanitize=False).root
 
 def normalize_html(s):
-    soup = BeautifulSoup(s, "lxml")
-    roots = soup.body.contents if soup.body is not None else soup.contents
-    children = [n for n in (_norm_node(c, False) for c in roots) if n is not None]
+    root = parse_html(s)
+    children = _norm_children(root, False)
     _norm_text_edges(children, True, False)
     return children
 
@@ -134,5 +136,5 @@ _CASES = all_cases()
 @pytest.mark.parametrize("name,example,section,md,html", _CASES,
     ids=[f"{c[0]}:{c[1]}:{c[2]}" for c in _CASES])
 def test_conformance(name, example, section, md, html):
-    actual = to_xhtml(md, math="off", auto_ids=False)   # fixtures track upstream specs, not our id sugar
+    actual = to_mdhtml(md, math="off", auto_ids=False)   # fixtures track upstream specs, not our id sugar
     assert normalize_html(html) == normalize_html(actual)

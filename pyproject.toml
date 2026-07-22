@@ -3,36 +3,36 @@ requires = ["maturin~=1.0"]
 build-backend = "maturin"
 
 [project]
-name = "xhtmlmd"
+name = "mdhtml"
 dynamic = ["version"]
-description = "A bounded-time, Pandoc-leaning Markdown parser with GFM, Extra/kramdown, math, fenced divs, and XHTML output."
+description = "A bounded-time, Pandoc-leaning Markdown parser with GFM, Extra/kramdown, math, fenced divs, and MDHTML output."
 license = {text = "MIT OR Apache-2.0"}
 requires-python = ">=3.10"
+dependencies = ["justhtml>=3.9.0"]
 readme = "README.md"
 authors = [{name = "Jeremy Howard", email = "j@fast.ai"}]
 classifiers = [
     "Programming Language :: Rust",
     "Programming Language :: Python :: Implementation :: CPython",
 ]
-
 [project.scripts]
-xhtmlmd = "xhtmlmd.__main__:main"
+mdhtml = "mdhtml.__main__:main"
 
 [project.urls]
-Homepage = "https://github.com/AnswerDotAI/xhtmlmd"
-Repository = "https://github.com/AnswerDotAI/xhtmlmd"
-Issues = "https://github.com/AnswerDotAI/xhtmlmd/issues"
+Homepage = "https://github.com/AnswerDotAI/mdhtml"
+Repository = "https://github.com/AnswerDotAI/mdhtml"
+Issues = "https://github.com/AnswerDotAI/mdhtml/issues"
 
 [project.optional-dependencies]
-dev = ["fastship>=0.0.14", "maturin~=1.0", "pytest", "fastpylight>=0.1.6", "math-core~=0.7.0", "beautifulsoup4", "lxml"]
+dev = ["fastship>=0.0.14", "maturin~=1.0", "pytest", "fastpylight>=0.1.6", "math-core~=0.7.0"]
 
 [project.entry-points.fastaudit_safe_native]
-xhtmlmd = "xhtmlmd"
+mdhtml = "mdhtml"
 
 [tool.maturin]
 features = ["extension-module"]
 python-source = "python"
-module-name = "xhtmlmd._native"
+module-name = "mdhtml._native"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

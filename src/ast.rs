@@ -54,17 +54,13 @@ impl Attr {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Align {
+    #[default]
     None,
     Left,
     Center,
     Right,
-}
-impl Default for Align {
-    fn default() -> Self {
-        Align::None
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -191,7 +187,13 @@ pub enum Block {
     },
     Figure {
         attrs: Attr,
+        caption: Vec<Inline>,
         image: Inline,
+    },
+    TemplateToken {
+        syntax: String,
+        source: String,
+        body: String,
     },
 
     Raw {
@@ -215,7 +217,7 @@ impl Block {
             | Block::Div { attrs, .. }
             | Block::Math { attrs, .. }
             | Block::Figure { attrs, .. } => Some(attrs),
-            Block::Html { .. } | Block::Raw { .. } => None,
+            Block::Html { .. } | Block::TemplateToken { .. } | Block::Raw { .. } => None,
         }
     }
 }
@@ -275,6 +277,11 @@ pub enum Inline {
         title: String,
     },
     Html(String),
+    TemplateToken {
+        syntax: String,
+        source: String,
+        body: String,
+    },
     Math {
         attrs: Attr,
         display: bool,
