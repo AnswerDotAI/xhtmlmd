@@ -175,10 +175,10 @@ def _insert_first(el, node): el.insert_before(node, el.children[0] if el.childre
 
 
 class _Exporter(Resolver):
-    def __init__(self, reftypes, number_headings, hl, toc, strict_refs=True, hl_lang=None, code_wrap=None):
+    def __init__(self, reftypes, number_headings, hl, toc, refs="resolve", id_prefix="", hl_lang=None, code_wrap=None):
         super().__init__(reftypes)
-        self.number_headings, self.hl, self.toc = number_headings, hl, toc
-        self.strict_refs, self.hl_lang, self.code_wrap = strict_refs, hl_lang, code_wrap
+        self.number_headings, self.hl, self.toc, self.refs = number_headings, hl, toc, refs
+        self.id_prefix, self.hl_lang, self.code_wrap = id_prefix, hl_lang, code_wrap
         self.warnings = []
 
     def run(self, root):
@@ -193,23 +193,21 @@ class _Exporter(Resolver):
         grouped = {id(a) for g in groups for a in _els(g) if a.name == "a"}
         singles = [e for e in els if e.name == "a" and "data-ref" in e.attrs and id(e) not in grouped]
         refs = []
-        for a in [a for g in groups for a in _els(g) if a.name == "a"] + singles:
-            try: refs.append((a, self._parse_ref(a)))
-            except ValueError:
-                if self.strict_refs: raise
-
+        if self.refs == "resolve":
+            refs = [(a, self._parse_ref(a)) for g in groups for a in _els(g) if a.name == "a"]
+            refs += [(a, self._parse_ref(a)) for a in singles]
         self._number_headings(refs)
         self._number_captions([e for e in els if e.name in ("figure", "table")])
-        for g in groups: self._lower_group(g)
-        for a in singles:
-            try:
+        if self.refs == "resolve":
+            for g in groups: self._lower_group(g)
+            for a in singles:
                 tgt, tokens = self._parse_ref(a)
                 _set_children(a, [Text(self.prefix(a.to_text().strip(), tgt, tokens) + self.core(tgt, tokens))])
                 del a.attrs["data-ref"]
-            except ValueError as e:
-                if self.strict_refs: raise
-                self.warnings.append(str(e))
-                a.parent.replace_child(Text("#" + (a.attrs.get("href") or "#")[1:]), a)
+        else:
+            for g in groups: self._lower_group_ids(g)
+            for a in singles: self._bake_id(a)
+        self._prefix_ids(els)
         self._raw([e for e in els if e.name == "script" and e.attrs.get("type") == _RAW_TYPE])
         for t in els:
             if t.name == "table" and "colwidths" in t.attrs: self._colgroup(t)
@@ -262,18 +260,41 @@ class _Exporter(Resolver):
         types = [(a.attrs.get("href") or "#")[1:].split("-")[0] for a in anchors]
         for (sep, pre, plural), a in zip(group_plan(types), anchors):
             if sep: out.append(Text(sep))
-            try:
-                tgt, tokens = self._parse_ref(a)
-                if pre and (p := self.prefix(a.to_text().strip(), tgt, tokens, plural)): out.append(Text(p))
-                _set_children(a, [Text(self.core(tgt, tokens))])
-                del a.attrs["data-ref"]
-                out.append(a)
-            except ValueError as e:
-                if self.strict_refs: raise
-                self.warnings.append(str(e))
-                out.append(Text("#" + (a.attrs.get("href") or "#")[1:]))
+            tgt, tokens = self._parse_ref(a)
+            if pre and (p := self.prefix(a.to_text().strip(), tgt, tokens, plural)): out.append(Text(p))
+            _set_children(a, [Text(self.core(tgt, tokens))])
+            del a.attrs["data-ref"]
+            out.append(a)
         del span.attrs["data-refs"]
         _set_children(span, out)
+
+    def _bake_id(self, a):
+        "Bake one ref anchor as an id-text link (`refs='ids'`): author text kept as a prefix, `xref` class for styling."
+        tgt = (a.attrs.get("href") or "#")[1:]
+        text = a.to_text().strip()
+        _set_children(a, [Text(f"{text} {tgt}" if text else tgt)])
+        a.attrs["href"] = f"#{self.id_prefix}{tgt}"
+        a.attrs["class"] = "xref"
+        del a.attrs["data-ref"]
+
+    def _lower_group_ids(self, span):
+        anchors = [a for a in _els(span) if a.name == "a"]
+        out = []
+        for (sep, _, _), a in zip(group_plan([""] * len(anchors)), anchors):
+            if sep: out.append(Text(sep))
+            self._bake_id(a)
+            out.append(a)
+        del span.attrs["data-refs"]
+        _set_children(span, out)
+
+    def _prefix_ids(self, els):
+        "Namespace ids under `id_prefix`: every element id (original kept in `data-id`), plus links to in-fragment ids."
+        if not self.id_prefix: return
+        ids = {i for e in els if (i := e.attrs.get("id"))}
+        for e in els:
+            if i := e.attrs.get("id"): e.attrs.update({"id": self.id_prefix + i, "data-id": i})
+            if e.name == "a" and (h := e.attrs.get("href") or "").startswith("#") and h[1:] in ids:
+                e.attrs["href"] = f"#{self.id_prefix}{h[1:]}"
 
     def _raw(self, scripts):
         for el in scripts:
@@ -347,17 +368,21 @@ class _Exporter(Resolver):
 
 
 def to_html(src, dest=None, reftypes: dict | None = None, number_headings=None, hl: str | None = "spans",
-    toc: bool = False, strict_refs: bool = True, hl_lang=None, code_wrap=None) -> Html:
+    toc: bool = False, refs: str = "resolve", id_prefix: str = "", hl_lang=None, code_wrap=None) -> Html:
     """Lower MDHTML (a string or DocumentFragment; never mutated) to finished HTML: cross-references
     baked as links, headings and captions numbered, `{=html}` raw data spliced, `colwidths` lowered,
-    and code highlighted. `strict_refs=False` degrades each failing reference to plain `#target` text
-    with a warning instead of raising. Per code block, `hl_lang(text, lang)` may return a corrected
-    language (`lang` is None for a bare fence), and `code_wrap(html, lang, text)` may return
-    replacement markup for the highlighted block (None keeps it; `text` is unescaped). Returns an
-    `Html` str carrying `.warnings`; `dest` also writes it to a file."""
+    and code highlighted. `refs='ids'` instead bakes each reference as a working link showing its
+    target id (class `xref`), with no registry, numbering, or failure modes - for live-preview
+    contexts where targets may sit outside the fragment. `id_prefix` namespaces the output's ids:
+    every element id is prefixed (original kept in `data-id`), along with ref hrefs and links to
+    in-fragment ids; links to outside ids are untouched. Per code block, `hl_lang(text, lang)` may
+    return a corrected language (`lang` is None for a bare fence), and `code_wrap(html, lang, text)`
+    may return replacement markup for the highlighted block (None keeps it; `text` is unescaped).
+    Returns an `Html` str carrying `.warnings`; `dest` also writes it to a file."""
+    if refs not in ("resolve", "ids"): raise ValueError(f"unknown refs mode {refs!r}")
     if not isinstance(src, str): src = src.to_html(pretty=False)
     root = parse_mdhtml(src)
-    ex = _Exporter(reftypes, number_headings, hl, toc, strict_refs, hl_lang, code_wrap)
+    ex = _Exporter(reftypes, number_headings, hl, toc, refs, id_prefix, hl_lang, code_wrap)
     ex.run(root)
     res = Html(root.to_html(pretty=False), ex.warnings)
     if dest is not None: Path(dest).write_text(res, encoding="utf-8")

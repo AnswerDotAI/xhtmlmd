@@ -111,7 +111,7 @@ def test_math_js():
 
 def test_result_types_copy():
     import copy, pickle
-    for r in (to_html('<p>See <a data-ref="" href="#nope"></a></p>', strict_refs=False), to_md('# A {#sec-a}\n')):
+    for r in (to_html('<p id="x">Hi</p>'), to_md('# A {#sec-a}\n')):
         for c in (copy.deepcopy(r), pickle.loads(pickle.dumps(r))): assert (c, type(c), c.warnings) == (r, type(r), r.warnings)
 
 
@@ -130,14 +130,27 @@ def test_code_hooks():
     assert '<div class="copy-wrap"><pre>' in h
     assert '<pre class="mermaid">graph TD</pre>' in h and 'language-mermaid' not in h
 
-def test_strict_refs_off():
-    src = to_mdhtml('# A {#zap-a}\n\nSee [@sec-nope], [@zap-a], and [@fig-e; @sec-nope].\n\n![E](e.png){#fig-e}\n',
+def test_refs_ids():
+    src = to_mdhtml('# A {#sec-a}\n\nSee [@sec-a], [Clause @sec-b], [-@sec-a], and [@fig-e; @sec-nope].\n\n![E](e.png){#fig-e}\n',
         implicit_figures=True)
-    h = to_html(src, strict_refs=False)
-    assert '#sec-nope' in h and '#zap-a' in h            # failing refs degrade to plain text
-    assert 'Figure 1' in h                               # healthy refs in the same doc still resolve
-    assert len(h.warnings) == 3
-    with pytest.raises(ValueError): to_html(src)         # strict stays the default
+    h = to_html(src, refs='ids')
+    assert '<a href="#sec-a" class="xref">sec-a</a>' in h
+    assert '<a href="#sec-b" class="xref">Clause sec-b</a>' in h     # author text kept as prefix
+    assert '<a href="#fig-e" class="xref">fig-e</a> and <a href="#sec-nope" class="xref">sec-nope</a>' in h
+    assert 'heading-number' not in h and h.warnings == []            # no numbering, no registry, nothing to fail
+    with pytest.raises(ValueError): to_html(src, refs='nope')
+
+
+def test_id_prefix():
+    src = to_mdhtml('# A {#sec-a}\n\nSee [@sec-a], [x](#sec-a), [m](#_deadbeef), and note[^1].\n\n[^1]: B\n')
+    h = to_html(src, refs='ids', id_prefix='md-')
+    assert '<h1 id="md-sec-a" data-id="sec-a">' in h
+    assert '<a href="#md-sec-a" class="xref">sec-a</a>' in h         # ref hrefs prefixed unconditionally
+    assert '<a href="#md-sec-a">x</a>' in h                          # user link to an in-fragment id follows
+    assert 'href="#_deadbeef"' in h                                  # link to an id outside the fragment untouched
+    assert 'id="md-fnref-1"' in h and 'href="#md-fn-1"' in h and 'id="md-fn-1"' in h and 'href="#md-fnref-1"' in h
+    hr = to_html(to_mdhtml('# A {#sec-a}\n\nSee [@sec-a].'), id_prefix='p-')
+    assert '<a href="#p-sec-a">Section 1</a>' in hr                  # resolve mode prefixes via fragment membership
 
 
 def test_to_md_refs_and_numbering():
