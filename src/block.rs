@@ -2402,10 +2402,15 @@ impl<'a> ContainerBuilder<'a> {
         }
     }
 
-
     /// Recursive walk emitting `(node, start, end)` for headings and tables
     /// nested inside containers (depth > 0), for `Options::nested_spans`.
-    fn nested_nodes(&self, idx: usize, end: usize, depth: usize, out: &mut Vec<(usize, usize, usize)>) {
+    fn nested_nodes(
+        &self,
+        idx: usize,
+        end: usize,
+        depth: usize,
+        out: &mut Vec<(usize, usize, usize)>,
+    ) {
         let children = &self.nodes[idx].children;
         for (n, &child) in children.iter().enumerate() {
             let child_end = children
