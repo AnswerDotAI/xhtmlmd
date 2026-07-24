@@ -74,6 +74,6 @@ pytest -q
 ship-rs-release
 ```
 
-4. After pushing the release tag, run `ship-rs-bump`, commit the `Cargo.toml` version bump, and push to `main` without a tag.
+4. After pushing the release tag, run `ship-bump` (it detects Cargo.toml and refreshes the editable install), commit the `Cargo.toml` version bump, and push to `main` without a tag.
 
 No local wheel build is required for release. CI builds wheels for Linux and macOS, creates a GitHub Release, and publishes to PyPI.
