@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from fast5ever import parse_fragment
+from fast5ever import Comment, Element, Text, parse_fragment
 from mdhtml import to_mdhtml
 
 SOURCE = Path(__file__).parent / "source"
@@ -109,9 +109,9 @@ def _norm_text(text, in_pre):
 def _norm_children(node, in_pre): return [norm for norm in (_norm_node(child, in_pre) for child in node.children) if norm is not None]
 
 def _norm_node(node, in_pre):
-    if node.name == "#text": return _norm_text(node.text, in_pre)
-    if node.name == "#comment": return ["comment", node.text]
-    if node.name.startswith("#"): return None
+    if isinstance(node, Text): return _norm_text(node.text, in_pre)
+    if isinstance(node, Comment): return ["comment", node.text]
+    if not isinstance(node, Element): return None
     tag = node.name
     nxt = in_pre or tag == "pre"
     attrs = [(key, _norm_attr_value(key, value)) for key, value in node.attrs.items()]

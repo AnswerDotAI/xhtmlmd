@@ -2,7 +2,7 @@ import subprocess
 
 import pytest
 
-from fast5ever import parse_fragment
+from fast5ever import Comment, Element, parse_fragment
 from mdhtml import TemplateDelimiter, blocks, parse_mdhtml, render, to_dom, to_mdhtml
 from test_conformance import normalize_html
 
@@ -110,7 +110,7 @@ def test_template_delimiter_validation():
 
 def test_whatwg_tree_construction_and_namespaces():
     root = parse_mdhtml("<p>before <div>x</div> after</p><table><tr><td>A</table><math><mi>y</mi></math>")
-    assert [node.name if not node.name.startswith("#") else node.text for node in root.children] == ["p", "div", " after", "p", "table", "math"]
+    assert [node.name if isinstance(node, Element) else node.text for node in root.children] == ["p", "div", " after", "p", "table", "math"]
     table = root.children[4]
     assert table.children[0].name == "tbody"
     assert root.children[5].namespace == "http://www.w3.org/1998/Math/MathML"
@@ -137,8 +137,8 @@ def test_elements_outside_the_portable_core_remain_dom_nodes():
 def test_fragment_dom_is_mutable():
     doc = parse_mdhtml('<p class="old">Hello <em>world</em></p>')
     paragraph = doc.children[0]
-    paragraph.set_attr("class", "new")
-    paragraph.set_attr("data-kind", "intro")
+    paragraph.attrs["class"] = "new"
+    paragraph.attrs["data-kind"] = "intro"
     paragraph.replace_child(parse_mdhtml("Hi "), paragraph.children[0])
     em = paragraph.children[1]
     em.replace_child(parse_mdhtml("everyone"), em.children[0])
@@ -172,7 +172,7 @@ def test_html_names_and_comments_that_xml_rejects():
     doc = parse_mdhtml('<a zoop:33="x"></a><!-- this is a -- comment -->')
     anchor,comment = doc.children
     assert anchor.attrs["zoop:33"] == "x"
-    assert comment.name == "#comment" and "--" in comment.text
+    assert isinstance(comment, Comment) and "--" in comment.text
     assert doc.to_html() == '<a zoop:33="x"></a><!-- this is a -- comment -->'
 
 

@@ -255,3 +255,12 @@ def test_fill_md():
     tbl = '<table class="sig">\n<tr><td>Name: {{who}}</td><td>Date: {{when}}</td></tr>\n</table>\n\nAfter [@sec-a].\n'
     out2 = fill_md(tbl, dict(who='Sam', when='today'))
     assert out2 == tbl.replace('{{who}}', 'Sam').replace('{{when}}', 'today')   # raw-HTML tables fill too
+
+
+def test_resolver_registries_are_read_only():
+    from mdhtml.export import Resolver
+    r = Resolver()
+    r.register("sec-a", "block", "Alpha")
+    assert r.kinds["sec-a"] == "block" and r.idtext["sec-a"] == "Alpha"
+    with pytest.raises(TypeError):
+        r.kinds["sec-a"] = "caption"  # registries are read-only views; register() is the write path

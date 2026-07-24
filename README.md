@@ -114,14 +114,14 @@ from mdhtml import parse_mdhtml, to_dom
 
 doc = to_dom("Hello *world*")
 paragraph = doc.children[0]
-paragraph.set_attr("class", "intro")
+paragraph.attrs["class"] = "intro"
 em = paragraph.children[1]
 em.replace_child(parse_mdhtml("everyone"), em.children[0])
 paragraph.append_child(parse_mdhtml("!"))
 html = doc.to_html()
 ```
 
-Use `parse_mdhtml(source)` when the input is already MDHTML. Both functions parse as an HTML `body` fragment, which is the processing context defined by the dialect. Inserting a `#document` node splices its children in (DocumentFragment semantics), and inserting a node from another tree copies it. See fast5ever's README for the node API: `name`, `attrs`, `children`, `parent`, `text`, `to_html()`, `to_text()`, and the mutation methods.
+Use `parse_mdhtml(source)` when the input is already MDHTML. Both functions parse as an HTML `body` fragment, which is the processing context defined by the dialect. Inserting a `Document` node splices its children in (DocumentFragment semantics), and inserting a node from another tree copies it. See fast5ever's README for the node API: `name`, `attrs`, `children`, `parent`, `text`, `to_html()`, `to_text()`, and the mutation methods.
 
 ### Markdown rewriting
 

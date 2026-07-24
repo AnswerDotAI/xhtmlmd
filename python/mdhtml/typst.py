@@ -6,7 +6,7 @@ template tokens render through a `tmpl` callable as in mdhtml2docx. A submodule 
 import re, subprocess, tempfile
 from pathlib import Path
 
-from fast5ever import parse_fragment as parse_mdhtml
+from fast5ever import Element, Text, parse_fragment as parse_mdhtml
 from .export import _HEADS, _RAW_TYPE, _els, _text, HeadingNums, Resolver, decode_raw, group_plan, ref_tokens, ref_variant
 
 __all__ = ["to_typst", "to_pdf"]
@@ -87,9 +87,9 @@ class _TypstExporter(Resolver):
     def _blocks(self, el):
         out = []
         for c in el.children:
-            if c.name == "#text":
+            if isinstance(c, Text):
                 if c.text.strip(): out.append(_esc(c.text.strip()))
-            elif not c.name.startswith("#") and (b := self._block(c)) is not None: out.append(b)
+            elif isinstance(c, Element) and (b := self._block(c)) is not None: out.append(b)
         return "\n\n".join(out)
 
     def _block(self, el):
@@ -128,7 +128,7 @@ class _TypstExporter(Resolver):
         "A list item's inline body and its nested sub-lists."
         parts, subs = [], []
         for c in li.children:
-            if c.name == "#text": parts.append(_esc(c.text))
+            if isinstance(c, Text): parts.append(_esc(c.text))
             elif c.name in ("ul", "ol"): subs.append(c)
             elif c.name == "p": parts.append(self._inline(c))
             else: parts.append(self._inline_el(c))
@@ -211,8 +211,8 @@ class _TypstExporter(Resolver):
     def _inline(self, el):
         out = []
         for c in el.children:
-            if c.name == "#text": out.append(_esc(c.text))
-            elif not c.name.startswith("#"): out.append(self._inline_el(c))
+            if isinstance(c, Text): out.append(_esc(c.text))
+            elif isinstance(c, Element): out.append(self._inline_el(c))
         return "".join(out)
 
     def _inline_el(self, el):

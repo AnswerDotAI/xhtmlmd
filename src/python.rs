@@ -373,6 +373,15 @@ impl HeadingNums {
     }
 }
 
+/// The registries' snapshot dicts, exposed read-only: mutating one raises
+/// instead of silently editing a copy (registration methods are the write path).
+fn proxy(d: Bound<'_, PyDict>) -> PyResult<Bound<'_, PyAny>> {
+    d.py()
+        .import("types")?
+        .getattr("MappingProxyType")?
+        .call1((d,))
+}
+
 /// Cross-reference resolution shared by exporters: a registry of targets
 /// (registered via `register`/`set_headnum`/`set_capnum`; the mapping
 /// attributes are read-only snapshots) and the baked text each reference
@@ -403,48 +412,48 @@ impl Resolver {
     }
 
     #[getter]
-    fn reftypes<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+    fn reftypes<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let d = PyDict::new(py);
         for (k, v) in &self.inner.reftypes {
             d.set_item(k, v)?;
         }
-        Ok(d)
+        proxy(d)
     }
 
     #[getter]
-    fn kinds<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+    fn kinds<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let d = PyDict::new(py);
         for (k, v) in &self.inner.kinds {
             d.set_item(k, v)?;
         }
-        Ok(d)
+        proxy(d)
     }
 
     #[getter]
-    fn idtext<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+    fn idtext<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let d = PyDict::new(py);
         for (k, v) in &self.inner.idtext {
             d.set_item(k, v)?;
         }
-        Ok(d)
+        proxy(d)
     }
 
     #[getter]
-    fn headnums<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+    fn headnums<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let d = PyDict::new(py);
         for (k, v) in &self.inner.headnums {
             d.set_item(k, v)?;
         }
-        Ok(d)
+        proxy(d)
     }
 
     #[getter]
-    fn capnums<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+    fn capnums<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let d = PyDict::new(py);
         for (k, v) in &self.inner.capnums {
             d.set_item(k, v)?;
         }
-        Ok(d)
+        proxy(d)
     }
 
     /// Record a target: its kind (`'block'`/`'caption'`, when known) and its

@@ -3,6 +3,7 @@
 import json
 from pathlib import Path
 
+from fast5ever import Element
 from ._native import HeadingNums, Resolver as _Resolver, group_plan, mustache_kind, ref_tokens, ref_variant
 from ._native import REFTYPES, SCHEMES, decode_raw as _decode_raw, export_html as _export_html, math_js as _math_js
 
@@ -43,7 +44,7 @@ class Html(str):
     def __getnewargs__(self): return (str(self), self.warnings)
 
 
-def _els(el): return [c for c in el.children if not c.name.startswith("#")]
+def _els(el): return [c for c in el.children if isinstance(c, Element)]
 
 def _text(el): return " ".join(el.to_text().split())
 
