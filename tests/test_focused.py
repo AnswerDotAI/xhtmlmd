@@ -148,15 +148,15 @@ def test_raw_attribute_blocks_and_inlines():
 
 def test_ref_syntax():
     html = to_mdhtml('see [@sec-pay] here')
-    assert '<a href="#sec-pay" data-ref></a>' in html
+    assert '<a href="#sec-pay" data-ref=""></a>' in html
     html = to_mdhtml('in [-@sec-pay], the')
     assert '<a href="#sec-pay" data-ref="bare"></a>' in html
     html = to_mdhtml('per [Clause @sec-pay].')
-    assert '<a href="#sec-pay" data-ref>Clause</a>' in html
+    assert '<a href="#sec-pay" data-ref="">Clause</a>' in html
     html = to_mdhtml('the terms in [@sec-a; @sec-b; @sec-c] survive')
-    assert ('<span data-refs><a href="#sec-a" data-ref></a>'
-        '<a href="#sec-b" data-ref></a>'
-        '<a href="#sec-c" data-ref></a></span>') in html
+    assert ('<span data-refs=""><a href="#sec-a" data-ref=""></a>'
+        '<a href="#sec-b" data-ref=""></a>'
+        '<a href="#sec-c" data-ref=""></a></span>') in html
     html = to_mdhtml('see [-@sec-pay]{ref=page}')
     assert '<a href="#sec-pay" data-ref="bare page"></a>' in html
 
@@ -206,7 +206,7 @@ def test_implicit_figures_are_opt_in():
     src = '![A cap](i.png){#fig-x .wide}'
     assert_html(to_mdhtml(src), '<p><img src="i.png" alt="A cap" id="fig-x" class="wide"></p>')
     html = to_mdhtml(src, implicit_figures=True)
-    assert '<figure id="fig-x" class="wide">' in html and ' alt>' in html and '<figcaption>A cap</figcaption>' in html
+    assert '<figure id="fig-x" class="wide">' in html and ' alt="">' in html and '<figcaption>A cap</figcaption>' in html
     assert '<p>text <img' in to_mdhtml('text ![A cap](i.png)')   # not alone: no figure
     assert blocks(src)[0]["type"] == "paragraph"
     assert blocks(src, implicit_figures=True)[0]["type"] == "figure"

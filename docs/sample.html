@@ -34,7 +34,7 @@ with attributes.</p>
 <p>Bare links such as <a href="https://example.org/docs">https://example.org/docs</a> are linked automatically.
 Angle links work too: <a href="https://example.com/spec">https://example.com/spec</a>.</p>
 <figure class="thumbnail">
-<img src="https://dummyimage.com/96x48/eeeeee/333333.png&amp;text=demo" alt width="96" height="48">
+<img src="https://dummyimage.com/96x48/eeeeee/333333.png&amp;text=demo" alt="" width="96" height="48">
 <figcaption>A small placeholder image</figcaption>
 </figure>
 <h2 id="lists-and-tasks">Lists and tasks</h2>
@@ -66,9 +66,9 @@ Angle links work too: <a href="https://example.com/spec">https://example.com/spe
 <li>Add a stylesheet</li>
 </ol>
 <ul class="task-list">
-<li><input type="checkbox" disabled checked> Tables</li>
-<li><input type="checkbox" disabled checked> Footnotes</li>
-<li><input type="checkbox" disabled> Final polish</li>
+<li><input type="checkbox" disabled="disabled" checked="checked"> Tables</li>
+<li><input type="checkbox" disabled="disabled" checked="checked"> Footnotes</li>
+<li><input type="checkbox" disabled="disabled"> Final polish</li>
 </ul>
 <h2 id="block-quotes-and-rules">Block quotes and rules</h2>
 <pre><code class="language-markdown">&gt; A block quote can contain normal inline Markdown.
@@ -264,7 +264,7 @@ its trailing attribute list applies to the table:</p>
 : Delivery stages {#tbl-stages}
 </code></pre>
 <figure id="fig-diagram">
-<img src="https://dummyimage.com/96x48/eeeeee/333333.png&amp;text=fig" alt>
+<img src="https://dummyimage.com/96x48/eeeeee/333333.png&amp;text=fig" alt="">
 <figcaption>A labeled diagram</figcaption>
 </figure>
 <table id="tbl-stages">
@@ -293,10 +293,10 @@ page [-@sec-late]{ref=page}, paragraph [-@sec-late]{ref=leaf} of
 </code></pre>
 <h3 id="sec-payment">Payment terms</h3>
 <h4 id="sec-late">Late fees</h4>
-<p>Interest accrues per <a href="#sec-late" data-ref></a>, within <a href="#sec-payment" data-ref="bare"></a>, as set out in
-<a href="#sec-late" data-ref>Clause</a>. The terms in <span data-refs><a href="#sec-payment" data-ref></a><a href="#sec-late" data-ref></a></span> survive termination.
-See also <a href="#fig-diagram" data-ref></a> and <a href="#tbl-stages" data-ref="bare"></a>, or the mixed pair
-<span data-refs><a href="#fig-diagram" data-ref></a><a href="#tbl-stages" data-ref></a></span>. Variants: the <a href="#sec-late" data-ref="bare text"></a> clause, on
+<p>Interest accrues per <a href="#sec-late" data-ref=""></a>, within <a href="#sec-payment" data-ref="bare"></a>, as set out in
+<a href="#sec-late" data-ref="">Clause</a>. The terms in <span data-refs=""><a href="#sec-payment" data-ref=""></a><a href="#sec-late" data-ref=""></a></span> survive termination.
+See also <a href="#fig-diagram" data-ref=""></a> and <a href="#tbl-stages" data-ref="bare"></a>, or the mixed pair
+<span data-refs=""><a href="#fig-diagram" data-ref=""></a><a href="#tbl-stages" data-ref=""></a></span>. Variants: the <a href="#sec-late" data-ref="bare text"></a> clause, on
 page <a href="#sec-late" data-ref="bare page"></a>, paragraph <a href="#sec-late" data-ref="bare leaf"></a> of
 <a href="#sec-late" data-ref="bare rel"></a>.</p>
 <h2 id="raw-passthrough">Raw passthrough</h2>

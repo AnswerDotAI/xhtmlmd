@@ -113,9 +113,7 @@ class _MdExporter:
             else: maxend = b["end"]
         self.heads = [b for b in spans if b["type"] == "heading"]
         for b in self.heads:
-            if i := b.get("id"):
-                res.kinds[i] = "block"
-                res.idtext[i] = b["text"]
+            if i := b.get("id"): res.register(i, "block", b["text"])
         self.caps, counts = {}, {}
         for b in spans:
             if b["type"] not in ("figure", "table"): continue
@@ -125,9 +123,8 @@ class _MdExporter:
             n = counts[label] = counts.get(label, 0) + 1
             self.caps[id(b)] = (label, n)
             if i := b.get("id"):
-                res.kinds[i] = "caption"
-                res.capnums[i] = (label, n)
-                res.idtext[i] = cap or ""
+                res.register(i, 'caption', cap or '')
+                res.set_capnum(i, label, n)
         self.xrefs = []
         for x in (n for n in nodes if n["type"] == "xref"):
             parsed = []
@@ -136,7 +133,8 @@ class _MdExporter:
                 toks = ref_tokens(" ".join(t for t in ("bare" if r["bare"] else "", x["tokens"] or "") if t))
                 parsed.append((r, toks))
             self.xrefs.append((x, parsed))
-        needed = any(res.kinds[r["target"]] == "block" and ref_variant(toks) != "text"
+        kinds = res.kinds
+        needed = any(kinds[r["target"]] == "block" and ref_variant(toks) != "text"
             for _, parsed in self.xrefs for r, toks in parsed)
         self.headnum = {}
         if self.number_headings or needed:
@@ -144,7 +142,7 @@ class _MdExporter:
             for b in self.heads:
                 if (d := nums.bump(b["level"] - 1)) is None: continue
                 self.headnum[id(b)] = d
-                if i := b.get("id"): res.headnums[i] = (d, nums.full(b["level"] - 1))
+                if i := b.get("id"): res.set_headnum(i, d, nums.full(b['level'] - 1))
 
     def _xref(self, x, parsed):
         out = []

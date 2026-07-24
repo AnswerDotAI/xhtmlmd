@@ -3,9 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from justhtml import Comment, Element, JustHTML, Text
-from justhtml.parser import FragmentContext
-from justhtml.serializer.html import _serialize_comment_data
+from fast5ever import parse_fragment
 from mdhtml import to_mdhtml
 
 SOURCE = Path(__file__).parent / "source"
@@ -111,9 +109,9 @@ def _norm_text(text, in_pre):
 def _norm_children(node, in_pre): return [norm for norm in (_norm_node(child, in_pre) for child in node.children) if norm is not None]
 
 def _norm_node(node, in_pre):
-    if isinstance(node, Text): return _norm_text(node.data, in_pre)
-    if isinstance(node, Comment): return ["comment", _serialize_comment_data(node.data)]
-    if not isinstance(node, Element): return None
+    if node.name == "#text": return _norm_text(node.text, in_pre)
+    if node.name == "#comment": return ["comment", node.text]
+    if node.name.startswith("#"): return None
     tag = node.name
     nxt = in_pre or tag == "pre"
     attrs = [(key, _norm_attr_value(key, value)) for key, value in node.attrs.items()]
@@ -122,7 +120,7 @@ def _norm_node(node, in_pre):
     _norm_text_edges(children, tag in BLOCK_TAGS, nxt)
     return ["el", f"{{{node.namespace}}}{tag}" if node.namespace else tag, attrs, children]
 
-def parse_html(s): return JustHTML(s, fragment_context=FragmentContext('body'), sanitize=False).root
+def parse_html(s): return parse_fragment(s)
 
 def normalize_html(s):
     root = parse_html(s)

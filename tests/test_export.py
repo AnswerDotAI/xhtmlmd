@@ -93,9 +93,9 @@ def test_toc():
 
 def test_api_shape(tmp_path):
     frag = parse_mdhtml('<p id="x">Hi</p><p><a data-ref="bare text" href="#x"></a></p>')
-    before = frag.to_html(pretty=False)
+    before = frag.to_html()
     h = to_html(frag)
-    assert frag.to_html(pretty=False) == before                    # input fragment not mutated
+    assert frag.to_html() == before                    # input fragment not mutated
     assert '<a href="#x">Hi</a>' in h
     out = tmp_path/'o.html'
     to_html('<p>Hi</p>', dest=out)
@@ -128,7 +128,7 @@ def test_code_hooks():
         hl_lang=lambda text, lang: text.split('\n')[0].removeprefix('%%') if text.startswith('%%') else lang)
     assert 'language-sql' in h and '<span class="hl-keyword">SELECT</span>' in h   # remapped, then highlighted
     assert '<div class="copy-wrap"><pre>' in h
-    assert '<pre class="mermaid">graph TD</pre>' in h and 'language-mermaid' not in h
+    assert '<pre class="mermaid">graph TD\n</pre>' in h and 'language-mermaid' not in h
 
 def test_hl_lang_alias():
     h = to_html(to_mdhtml('```py\n1+1\n```\n\n```nosuchlang\nx\n```\n'))

@@ -2,11 +2,13 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
+use pyo3::types::{PyDict, PyTuple};
+use std::collections::{HashMap, HashSet};
 
 use crate::ast::{Attr, Block, Document, Inline, TableCellContent};
 use crate::inline::EditNode;
 use crate::render::{CODE_BLOCK_CLOSE, code_block_open, plain, render_document, render_inlines};
+use crate::resolve;
 use crate::{MathMode, Options, TemplateDelimiter, TemplateForm};
 
 type TemplateArg = (String, String, String, Option<(String, String)>, String);
@@ -254,11 +256,254 @@ fn edit_nodes(
         .collect()
 }
 
+// ---------------------------------------------------------------------------
+// Shared exporter machinery (src/resolve.rs) bindings
+// ---------------------------------------------------------------------------
+
+fn vr(e: String) -> PyErr {
+    PyValueError::new_err(e)
+}
+
+fn schemes<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+    let out = PyDict::new(py);
+    for (name, scheme) in resolve::schemes() {
+        let d = PyDict::new(py);
+        for (lvl, fmt) in scheme {
+            d.set_item(lvl, fmt)?;
+        }
+        out.set_item(name, d)?;
+    }
+    Ok(out)
+}
+
+fn reftypes<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+    let out = PyDict::new(py);
+    for (name, pair) in resolve::reftypes() {
+        out.set_item(name, pair)?;
+    }
+    Ok(out)
+}
+
+#[pyfunction]
+#[pyo3(signature = (val))]
+fn ref_tokens(val: Option<&str>) -> PyResult<HashSet<String>> {
+    resolve::ref_tokens(val).map_err(vr)
+}
+
+#[pyfunction]
+fn ref_variant(tokens: HashSet<String>) -> String {
+    resolve::ref_variant(&tokens)
+}
+
+#[pyfunction]
+fn group_plan(types: Vec<String>) -> Vec<(String, bool, bool)> {
+    resolve::group_plan(&types)
+        .into_iter()
+        .map(|(s, p, pl)| (s.to_string(), p, pl))
+        .collect()
+}
+
+#[pyfunction]
+fn mustache_kind(body: &str) -> &'static str {
+    resolve::mustache_kind(body)
+}
+
+#[pyfunction]
+#[pyo3(signature = (payload, encoding))]
+fn decode_raw(payload: &str, encoding: Option<&str>) -> (Option<String>, Option<String>) {
+    resolve::decode_raw(payload, encoding)
+}
+
+#[pyfunction]
+#[pyo3(signature = (func, xtra))]
+fn math_js(func: Option<&str>, xtra: &str) -> String {
+    resolve::math_js(func, xtra)
+}
+
+/// Heading numbering per a `{lvlText: numFmt}` scheme (Word semantics):
+/// `bump` at each heading, then read its display or full-context number.
+#[pyclass(subclass, module = "mdhtml._native")]
+struct HeadingNums {
+    inner: resolve::HeadingNums,
+}
+
+#[pymethods]
+impl HeadingNums {
+    #[new]
+    fn new(scheme: &Bound<'_, PyAny>) -> PyResult<HeadingNums> {
+        let inner = if let Ok(name) = scheme.extract::<&str>() {
+            resolve::HeadingNums::named(name).map_err(vr)?
+        } else {
+            let items: Vec<(String, String)> = scheme
+                .cast::<PyDict>()?
+                .iter()
+                .map(|(k, v)| Ok((k.extract::<String>()?, v.extract::<String>()?)))
+                .collect::<PyResult<_>>()?;
+            resolve::HeadingNums::new(items).map_err(vr)?
+        };
+        Ok(HeadingNums { inner })
+    }
+
+    /// The scheme as `(lvlText, numFmt)` pairs in level order.
+    #[getter]
+    fn scheme(&self) -> Vec<(String, String)> {
+        self.inner.scheme.clone()
+    }
+
+    #[getter]
+    fn counts(&self) -> Vec<u32> {
+        self.inner.counts.clone()
+    }
+
+    /// Advance level `lvl` (0-based), resetting deeper levels; returns the
+    /// display number, or None beyond the scheme.
+    fn bump(&mut self, lvl: usize) -> Option<String> {
+        self.inner.bump(lvl)
+    }
+
+    /// The number as shown at a level-`lvl` heading.
+    fn display(&self, lvl: usize) -> String {
+        self.inner.display(lvl)
+    }
+
+    /// Word-style full context: ancestor displays concatenated, unless
+    /// `lvl`'s own lvlText already includes them.
+    fn full(&self, lvl: usize) -> String {
+        self.inner.full(lvl)
+    }
+}
+
+/// Cross-reference resolution shared by exporters: a registry of targets
+/// (registered via `register`/`set_headnum`/`set_capnum`; the mapping
+/// attributes are read-only snapshots) and the baked text each reference
+/// resolves to.
+#[pyclass(subclass, module = "mdhtml._native")]
+struct Resolver {
+    inner: resolve::Resolver,
+}
+
+#[pymethods]
+impl Resolver {
+    #[new]
+    #[pyo3(signature = (*args, **kwargs))]
+    fn new(args: &Bound<'_, PyTuple>, kwargs: Option<&Bound<'_, PyDict>>) -> PyResult<Resolver> {
+        // Subclass constructor args all arrive here; only the leading
+        // `reftypes` (positional or keyword) belongs to Resolver itself.
+        let mut reftypes: Option<HashMap<String, (String, String)>> = None;
+        if args.len() > 0 {
+            reftypes = args.get_item(0)?.extract()?;
+        } else if let Some(kw) = kwargs
+            && let Some(v) = kw.get_item("reftypes")?
+        {
+            reftypes = v.extract()?;
+        }
+        Ok(Resolver {
+            inner: resolve::Resolver::new(reftypes),
+        })
+    }
+
+    #[getter]
+    fn reftypes<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        let d = PyDict::new(py);
+        for (k, v) in &self.inner.reftypes {
+            d.set_item(k, v)?;
+        }
+        Ok(d)
+    }
+
+    #[getter]
+    fn kinds<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        let d = PyDict::new(py);
+        for (k, v) in &self.inner.kinds {
+            d.set_item(k, v)?;
+        }
+        Ok(d)
+    }
+
+    #[getter]
+    fn idtext<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        let d = PyDict::new(py);
+        for (k, v) in &self.inner.idtext {
+            d.set_item(k, v)?;
+        }
+        Ok(d)
+    }
+
+    #[getter]
+    fn headnums<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        let d = PyDict::new(py);
+        for (k, v) in &self.inner.headnums {
+            d.set_item(k, v)?;
+        }
+        Ok(d)
+    }
+
+    #[getter]
+    fn capnums<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        let d = PyDict::new(py);
+        for (k, v) in &self.inner.capnums {
+            d.set_item(k, v)?;
+        }
+        Ok(d)
+    }
+
+    /// Record a target: its kind (`'block'`/`'caption'`, when known) and its
+    /// text.
+    #[pyo3(signature = (id, kind=None, text=None))]
+    fn register(&mut self, id: &str, kind: Option<&str>, text: Option<&str>) {
+        self.inner.register(id, kind, text);
+    }
+
+    fn set_headnum(&mut self, id: &str, display: &str, full: &str) {
+        self.inner.set_headnum(id, display, full);
+    }
+
+    fn set_capnum(&mut self, id: &str, label: &str, n: u32) {
+        self.inner.set_capnum(id, label, n);
+    }
+
+    /// Raise for a reference to an unknown target id.
+    fn check(&self, tgt: &str) -> PyResult<()> {
+        self.inner.check(tgt).map_err(vr)
+    }
+
+    /// A reference's baked text, without any prefix word.
+    fn core(&self, tgt: &str, tokens: HashSet<String>) -> PyResult<String> {
+        self.inner.core(tgt, &tokens).map_err(vr)
+    }
+
+    /// Prefix text before a reference: `override` text, the type's prefix
+    /// word, or nothing for bare and caption refs.
+    #[pyo3(signature = (override_text, tgt, tokens, plural=false))]
+    fn prefix(
+        &self,
+        override_text: &str,
+        tgt: &str,
+        tokens: HashSet<String>,
+        plural: bool,
+    ) -> PyResult<String> {
+        self.inner
+            .prefix(override_text, tgt, &tokens, plural)
+            .map_err(vr)
+    }
+}
+
 #[pymodule]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(to_mdhtml, m)?)?;
     m.add_function(wrap_pyfunction!(blocks, m)?)?;
     m.add_function(wrap_pyfunction!(edit_nodes, m)?)?;
+    m.add("SCHEMES", schemes(m.py())?)?;
+    m.add("REFTYPES", reftypes(m.py())?)?;
+    m.add_function(wrap_pyfunction!(ref_tokens, m)?)?;
+    m.add_function(wrap_pyfunction!(ref_variant, m)?)?;
+    m.add_function(wrap_pyfunction!(group_plan, m)?)?;
+    m.add_function(wrap_pyfunction!(mustache_kind, m)?)?;
+    m.add_function(wrap_pyfunction!(decode_raw, m)?)?;
+    m.add_function(wrap_pyfunction!(math_js, m)?)?;
+    m.add_class::<HeadingNums>()?;
+    m.add_class::<Resolver>()?;
+    m.add_function(wrap_pyfunction!(export_html, m)?)?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
 }
@@ -813,4 +1058,78 @@ fn attr_node<'py>(py: Python<'py>, attrs: &Attr) -> PyResult<Bound<'py, PyDict>>
     d.set_item("classes", attrs.classes.clone())?;
     d.set_item("pairs", attrs.pairs.clone())?;
     Ok(d)
+}
+
+// ---------------------------------------------------------------------------
+// HTML exporter (src/export_html.rs) binding
+// ---------------------------------------------------------------------------
+
+#[pyfunction]
+#[pyo3(signature = (src, reftypes, number_headings, hl, toc, refs, id_prefix, fn_salt, hl_lang, code_wrap))]
+fn export_html(
+    py: Python<'_>,
+    src: &str,
+    reftypes: Option<HashMap<String, (String, String)>>,
+    number_headings: Option<&Bound<'_, PyAny>>,
+    hl: Option<&str>,
+    toc: bool,
+    refs: &str,
+    id_prefix: &str,
+    fn_salt: &str,
+    hl_lang: Option<Py<PyAny>>,
+    code_wrap: Option<Py<PyAny>>,
+) -> PyResult<(String, Vec<String>)> {
+    use crate::export_html::{HlMode, HtmlExportOptions, NumberHeadings};
+    let number_headings = match number_headings {
+        None => None,
+        Some(o) if o.is_none() => None,
+        Some(o) => Some(match o.extract::<String>() {
+            Ok(name) => NumberHeadings::Name(name),
+            Err(_) => NumberHeadings::Scheme(
+                o.cast::<PyDict>()?
+                    .iter()
+                    .map(|(k, v)| Ok((k.extract::<String>()?, v.extract::<String>()?)))
+                    .collect::<PyResult<_>>()?,
+            ),
+        }),
+    };
+    let hook_err: std::sync::Mutex<Option<PyErr>> = std::sync::Mutex::new(None);
+    let stash = |e: PyErr| -> String {
+        *hook_err.lock().unwrap() = Some(e);
+        "python hook raised".to_string()
+    };
+    let hl_lang_c = hl_lang.as_ref().map(|f| {
+        move |text: &str, lang: Option<&str>| -> Result<Option<String>, String> {
+            Python::attach(|py| f.bind(py).call1((text, lang))?.extract()).map_err(&stash)
+        }
+    });
+    let code_wrap_c = code_wrap.as_ref().map(|f| {
+        move |html: &str, lang: Option<&str>, text: &str| -> Result<Option<String>, String> {
+            Python::attach(|py| f.bind(py).call1((html, lang, text))?.extract()).map_err(&stash)
+        }
+    });
+    let opts = HtmlExportOptions {
+        reftypes,
+        number_headings,
+        hl: match hl {
+            None => None,
+            Some("spans") => Some(HlMode::Spans),
+            Some(_) => Some(HlMode::Api),
+        },
+        toc,
+        ids_mode: refs == "ids",
+        id_prefix: id_prefix.to_string(),
+        fn_salt: fn_salt.to_string(),
+        hl_lang: hl_lang_c.as_ref().map(|c| c as _),
+        code_wrap: code_wrap_c.as_ref().map(|c| c as _),
+    };
+    let result = if hl_lang.is_none() && code_wrap.is_none() {
+        py.detach(|| crate::export_html::export_html(src, &opts))
+    } else {
+        crate::export_html::export_html(src, &opts)
+    };
+    if let Some(e) = hook_err.into_inner().unwrap() {
+        return Err(e);
+    }
+    result.map_err(vr)
 }

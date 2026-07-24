@@ -6,9 +6,7 @@ template tokens render through a `tmpl` callable as in mdhtml2docx. A submodule 
 import re, subprocess, tempfile
 from pathlib import Path
 
-from justhtml import Element, Text
-
-from ._html import parse_mdhtml
+from fast5ever import parse_fragment as parse_mdhtml
 from .export import _HEADS, _RAW_TYPE, _els, _text, HeadingNums, Resolver, decode_raw, group_plan, ref_tokens, ref_variant
 
 __all__ = ["to_typst", "to_pdf"]
@@ -75,11 +73,12 @@ class _TypstExporter(Resolver):
     def run(self, root):
         for e in _walk_all(root):
             if not (i := e.attrs.get("id")): continue
-            self.idtext[i] = _text(e)
-            if e.name in ("figure", "table"): self.kinds[i] = "caption"
+            if e.name in ("figure", "table"): kind = "caption"
             elif e.name in _HEADS or e.name == "p":
-                self.kinds[i] = "block"
+                kind = "block"
                 if e.name in _HEADS: self.headids.add(i)
+            else: kind = None
+            self.register(i, kind, _text(e))
         self._harvest_footnotes(root)
         return self._blocks(root)
 
@@ -88,9 +87,9 @@ class _TypstExporter(Resolver):
     def _blocks(self, el):
         out = []
         for c in el.children:
-            if isinstance(c, Text):
-                if c.data.strip(): out.append(_esc(c.data.strip()))
-            elif isinstance(c, Element) and (b := self._block(c)) is not None: out.append(b)
+            if c.name == "#text":
+                if c.text.strip(): out.append(_esc(c.text.strip()))
+            elif not c.name.startswith("#") and (b := self._block(c)) is not None: out.append(b)
         return "\n\n".join(out)
 
     def _block(self, el):
@@ -129,7 +128,7 @@ class _TypstExporter(Resolver):
         "A list item's inline body and its nested sub-lists."
         parts, subs = [], []
         for c in li.children:
-            if isinstance(c, Text): parts.append(_esc(c.data))
+            if c.name == "#text": parts.append(_esc(c.text))
             elif c.name in ("ul", "ol"): subs.append(c)
             elif c.name == "p": parts.append(self._inline(c))
             else: parts.append(self._inline_el(c))
@@ -158,7 +157,7 @@ class _TypstExporter(Resolver):
 
     def _template(self, el, form):
         if self.tmpl is None: return None
-        return self.tmpl(el.template_content.to_text(), el.attrs.get("data-template"), form) or None
+        return self.tmpl(el.to_text(), el.attrs.get("data-template"), form) or None
 
     # ---- tables and figures ------------------------------------------------
 
@@ -212,8 +211,8 @@ class _TypstExporter(Resolver):
     def _inline(self, el):
         out = []
         for c in el.children:
-            if isinstance(c, Text): out.append(_esc(c.data))
-            elif isinstance(c, Element): out.append(self._inline_el(c))
+            if c.name == "#text": out.append(_esc(c.text))
+            elif not c.name.startswith("#"): out.append(self._inline_el(c))
         return "".join(out)
 
     def _inline_el(self, el):
@@ -249,8 +248,7 @@ class _TypstExporter(Resolver):
     def _harvest_footnotes(self, root):
         for sec in (e for e in _walk_all(root) if e.name == "section" and "footnotes" in _classes(e)):
             for li in (e for e in _walk_all(sec) if e.name == "li" and e.attrs.get("id", "").startswith("fn-")):
-                for back in [e for e in _walk_all(li) if e.name == "a" and "footnote-backref" in _classes(e)]:
-                    back.parent.remove_child(back)
+                for back in [e for e in _walk_all(li) if e.name == "a" and "footnote-backref" in _classes(e)]: back.detach()
                 self.fnotes[li.attrs["id"]] = self._blocks(li)
 
     # ---- references --------------------------------------------------------
@@ -313,7 +311,7 @@ def to_typst(src, dest=None, reftypes: dict | None = None, number_headings=None,
     order, case-insensitively) to extra Typst table arguments, e.g. `{'borderless table': 'stroke: none'}`.
     `prelude` text is prepended before the generated setup. Returns a `Typst`
     str carrying `.warnings`; `dest` also writes it to a file."""
-    if not isinstance(src, str): src = src.to_html(pretty=False)
+    if not isinstance(src, str): src = src.to_html()
     ex = _TypstExporter(reftypes, number_headings, tmpl, table_styles)
     body = ex.run(parse_mdhtml(src))
     parts = [prelude.rstrip()] if prelude else []

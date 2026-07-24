@@ -107,21 +107,21 @@ html = to_mdhtml('${make({"x": 1})}', templates=expressions)
 
 ### Mutable MDHTML DOM
 
-`to_dom` renders Markdown directly to a mutable [JustHTML](https://github.com/EmilStenstrom/justhtml) DOM:
+`to_dom` renders Markdown directly to a mutable [fast5ever](https://github.com/AnswerDotAI/fast5ever) DOM (html5ever's WHATWG parsing and serialization over an arena tree):
 
 ```python
-from justhtml import Text
-from mdhtml import to_dom
+from mdhtml import parse_mdhtml, to_dom
 
 doc = to_dom("Hello *world*")
 paragraph = doc.children[0]
-paragraph.attrs["class"] = "intro"
-paragraph.children[1].children[0].data = "everyone"
-paragraph.append_child(Text("!"))
-html = doc.to_html(pretty=False)
+paragraph.set_attr("class", "intro")
+em = paragraph.children[1]
+em.replace_child(parse_mdhtml("everyone"), em.children[0])
+paragraph.append_child(parse_mdhtml("!"))
+html = doc.to_html()
 ```
 
-Use `parse_mdhtml(source)` when the input is already MDHTML. Both functions parse as an HTML `body` fragment with sanitization disabled, which is the processing context defined by the dialect. JustHTML exposes parsed template contents as `template.template_content`. See its DOM API for node creation, mutation, traversal, querying, and serialization.
+Use `parse_mdhtml(source)` when the input is already MDHTML. Both functions parse as an HTML `body` fragment, which is the processing context defined by the dialect. Inserting a `#document` node splices its children in (DocumentFragment semantics), and inserting a node from another tree copies it. See fast5ever's README for the node API: `name`, `attrs`, `children`, `parent`, `text`, `to_html()`, `to_text()`, and the mutation methods.
 
 ### Markdown rewriting
 
@@ -246,14 +246,14 @@ from mdhtml import to_html, to_mdhtml
 html = to_html(to_mdhtml(markdown), number_headings='legal')
 ```
 
-The result is still a body fragment (a str subclass carrying a `warnings` list; pass `dest=` to also write a file). `to_html` accepts an MDHTML string or a JustHTML `DocumentFragment`, never mutates its input, and applies:
+The result is still a body fragment (a str subclass carrying a `warnings` list; pass `dest=` to also write a file). `to_html` accepts an MDHTML string or a fast5ever node, never mutates its input, and applies:
 
 - Cross-references become real links with baked text: `[@sec-pay]` renders as `<a href="#sec-pay">Section 1.</a>`, groups join as "Sections 1. and 1.(a)", and figure and table targets get "Figure 1"-style text. `reftypes=dict(exh=('Exhibit', 'Exhibits'))` adds prefix words beyond the built-in `sec`, `fig`, and `tbl`. A missing target, an unknown token, or an unknown type needing a prefix raises. The Word-only `page` and `rel` variants render as the full number. `refs='ids'` is the other mode, for live-preview contexts where targets may sit outside the fragment: each reference bakes as a working link showing its target id (`<a href="#sec-pay" class="xref">sec-pay</a>`, author text kept as a prefix, variants ignored), with no registry, numbering, or failure modes; captions render as authored, since without a registry the numbers would restart per fragment. `id_prefix='md-'` namespaces the output against the ids of a host page: every element id is prefixed (the original kept in `data-id`, e.g. for CSS `attr()` markers), along with ref hrefs and any link to an in-fragment id; links to outside ids are untouched. `fn_salt` adds a further prefix to footnote ids only (`fn-*`/`fnref-*`), keeping footnote pairs distinct across fragments that share one `id_prefix`.
 - Headings are numbered when `number_headings` is given ('legal', 'decimal', or a `{lvlText: numFmt}` dict as in mdhtml2docx), or automatically with 'decimal' when some reference needs a heading number. Numbers bake in as `<span class="heading-number">`, and full-context reference text ("3.(c)(iii)") is computed Word-style from the scheme.
 - Figures and tables number independently whenever refs resolve: a caption or an id earns a `<span class="caption-label">Figure 1</span>: ` in the `figcaption` or `caption`.
 - `{=html}` raw data is decoded and spliced in place; raw data for other formats is removed. Malformed payloads are dropped with a warning.
 - A `colwidths` attribute lowers to a `<colgroup>`; `fr` values share the width remaining after fixed lengths.
-- Code blocks with a language are highlighted when fastpylight is installed: `hl='spans'` (default) emits `hl-*` classed spans, `hl='api'` wraps the block in the `<hl-code>` element for the CSS Custom Highlight API, and `hl=None` leaves code untouched. Two per-block hooks customize this: `hl_lang(text, lang)` may return a corrected language before highlighting (e.g. mapping a `%%sql` first line to `sql`), and `code_wrap(html, lang, text)` may return replacement markup for the finished block (a copy-button wrapper, a mermaid `pre`).
+- Code blocks with a language are highlighted (natively, via the statically linked fastpylight engine): `hl='spans'` (default) emits `hl-*` classed spans, `hl='api'` wraps the block in the `<hl-code>` element for the CSS Custom Highlight API, and `hl=None` leaves code untouched. Two per-block hooks customize this: `hl_lang(text, lang)` may return a corrected language before highlighting (e.g. mapping a `%%sql` first line to `sql`), and `code_wrap(html, lang, text)` may return replacement markup for the finished block (a copy-button wrapper, a mermaid `pre`).
 - `toc=True` prepends a `<nav class="toc">` of the headings.
 
 `to_html` emits no styles or scripts. The assets each feature needs are supplied by your own pipeline:
@@ -314,7 +314,7 @@ The link parser uses raw reference-label scanning, bounded parenthesis nesting, 
 
 Raw HTML is preserved structurally. Supported raw HTML container tags such as `div`, `section`, `table`, `svg`, `math`, and custom elements stay open across blank lines until their matching close tag, with same-tag nesting counted; void and self-closing tags do not open Markdown containers. Markdown inside raw HTML remains raw unless the open tag that starts the Markdown block uses `markdown="1"`; this crate does not recursively look for markdown controls inside otherwise-raw HTML. `Options::default().tagfilter` is `false`; enabling it applies GFM-style filtering for tags such as `script`, `style`, `xmp`, and `textarea`. This is compatibility protection, not sanitization.
 
-After rendering and callbacks, mdhtml passes the complete provisional fragment through JustHTML once, using `FragmentContext("body")`, `sanitize=False`, and `pretty=False` serialization. WHATWG tree construction therefore supplies implied elements, repairs misnesting, normalizes names, and handles foreign SVG and MathML content. Raw HTML passes through as DOM structure rather than byte-for-byte source.
+After rendering and callbacks, mdhtml passes the complete provisional fragment through fast5ever (html5ever) once, as a `body` fragment. WHATWG tree construction therefore supplies implied elements, repairs misnesting, normalizes names, and handles foreign SVG and MathML content. Raw HTML passes through as DOM structure rather than byte-for-byte source.
 
 ## Tests
 

@@ -2,8 +2,7 @@ import subprocess
 
 import pytest
 
-from justhtml import Comment, Element, JustHTML, Template, Text
-from justhtml.parser import FragmentContext
+from fast5ever import parse_fragment
 from mdhtml import TemplateDelimiter, blocks, parse_mdhtml, render, to_dom, to_mdhtml
 from test_conformance import normalize_html
 
@@ -28,8 +27,8 @@ def test_template_delimiters_preserve_inline_source_as_inert_dom():
     assert_html(html, '<p>Hello <template data-template="mustache"> &lt;b&gt;&amp; name </template>.</p>')
     doc = to_dom("Hello {{ <b>& name }}.", templates=delimiters)
     template = doc.children[0].children[1]
-    assert isinstance(template, Template)
-    assert template.template_content.children[0].data == " <b>& name "
+    assert template.name == "template"
+    assert template.to_text() == " <b>& name "
     assert seen == [(dict(type="template_token", syntax="mustache", source="{{ <b>& name }}", body=" <b>& name ", form="inline"),
         '<template data-template="mustache"> &lt;b&gt;&amp; name </template>')]
 
@@ -39,8 +38,8 @@ def test_template_delimiters_use_longest_opener_and_allow_shared_syntax():
     doc = to_dom("{{{ bio }}} and {{ name }}", templates=delimiters)
     first,_,second = doc.children[0].children
     assert first.attrs["data-template"] == second.attrs["data-template"] == "expression"
-    assert first.template_content.children[0].data == " bio "
-    assert second.template_content.children[0].data == " name "
+    assert first.to_text() == " bio "
+    assert second.to_text() == " name "
 
 
 def test_template_delimiter_forms_and_block_spans():
@@ -74,7 +73,7 @@ def test_unmatched_escaped_and_code_template_openers_stay_literal():
     assert_html(to_mdhtml(r"\{{name}} {{ open", templates=delimiters), "<p>{{name}} {{ open</p>")
     assert_html(to_mdhtml("`{{name}}`", templates=delimiters), "<p><code>{{name}}</code></p>")
     assert "data-template" not in to_mdhtml("```\n{{name}}\n```", templates=delimiters)
-    assert isinstance(to_dom("<span>{{name}}</span>", templates=delimiters).children[0].children[0].children[0], Template)
+    assert to_dom("<span>{{name}}</span>", templates=delimiters).children[0].children[0].children[0].name == 'template'
     assert '<template data-template="mustache">name</template>' in to_mdhtml("<div>\n{{name}}\n</div>", templates=delimiters)
 
 
@@ -109,19 +108,19 @@ def test_template_delimiter_validation():
     with pytest.raises(ValueError, match="opening delimiter"): to_mdhtml("{{x}}", templates=same_open)
 
 
-def test_justhtml_uses_whatwg_tree_construction_and_namespaces():
+def test_whatwg_tree_construction_and_namespaces():
     root = parse_mdhtml("<p>before <div>x</div> after</p><table><tr><td>A</table><math><mi>y</mi></math>")
-    assert [node.name if isinstance(node, Element) else node.data for node in root.children] == ["p", "div", " after", "p", "table", "math"]
+    assert [node.name if not node.name.startswith("#") else node.text for node in root.children] == ["p", "div", " after", "p", "table", "math"]
     table = root.children[4]
     assert table.children[0].name == "tbody"
-    assert root.children[5].namespace == "math"
+    assert root.children[5].namespace == "http://www.w3.org/1998/Math/MathML"
 
 
 def test_inline_html_joins_the_mdhtml_hierarchy():
     root = to_dom('Before <span data-kind="note">some <em>HTML</em></span> after.')
     paragraph = root.children[0]
     text,span,tail = paragraph.children
-    assert paragraph.name == "p" and text.data == "Before " and tail.data == " after."
+    assert paragraph.name == "p" and text.text == "Before " and tail.text == " after."
     assert span.name == "span" and span.attrs["data-kind"] == "note"
     assert span.children[1].name == "em" and span.children[1].to_text() == "HTML"
 
@@ -132,69 +131,49 @@ def test_elements_outside_the_portable_core_remain_dom_nodes():
     control = paragraph.children[1]
     assert control.name == "input"
     assert control.attrs == {"type": "date", "name": "start"}
-    assert paragraph.children[2].data == "."
+    assert paragraph.children[2].text == "."
 
 
-def test_fragment_dom_is_mutable_and_serializes_with_justhtml():
+def test_fragment_dom_is_mutable():
     doc = parse_mdhtml('<p class="old">Hello <em>world</em></p>')
     paragraph = doc.children[0]
-    paragraph.attrs["class"] = "new"
-    paragraph.attrs["data-kind"] = "intro"
-    paragraph.children[0].data = "Hi "
-    paragraph.children[1].children[0].data = "everyone"
-    strong = Element("strong", {}, "html")
-    strong.append_child(Text("!"))
-    paragraph.append_child(strong)
-    assert paragraph.parent is doc
-    assert doc.to_html(pretty=False) == '<p class="new" data-kind="intro">Hi <em>everyone</em><strong>!</strong></p>'
+    paragraph.set_attr("class", "new")
+    paragraph.set_attr("data-kind", "intro")
+    paragraph.replace_child(parse_mdhtml("Hi "), paragraph.children[0])
+    em = paragraph.children[1]
+    em.replace_child(parse_mdhtml("everyone"), em.children[0])
+    paragraph.append_child(parse_mdhtml("<strong>!</strong>"))
+    assert paragraph.parent == doc
+    assert doc.to_html() == '<p class="new" data-kind="intro">Hi <em>everyone</em><strong>!</strong></p>'
 
 
 def test_contextual_fragments_parse_and_splice_into_the_document():
     doc = parse_mdhtml('<table><tbody></tbody></table><p>old</p>')
     tbody = doc.children[0].children[0]
-    rows = JustHTML('<tr><td>new</td></tr>', fragment_context=FragmentContext(tbody.name, tbody.namespace), sanitize=False).root
-    assert rows.to_html(pretty=False) == '<tr><td>new</td></tr>'
+    rows = parse_fragment('<tr><td>new</td></tr>', context=tbody.name)
+    assert rows.to_html() == '<tr><td>new</td></tr>'
     tbody.append_child(rows)
-    assert rows.children == []
+    assert rows.to_html() == '<tr><td>new</td></tr>'    # cross-tree inserts copy; the source tree is untouched
 
     replacement = parse_mdhtml('<hr><p>new</p>')
     doc.replace_child(replacement, doc.children[1])
-    assert replacement.children == []
-    assert doc.to_html(pretty=False) == '<table><tbody><tr><td>new</td></tr></tbody></table><hr><p>new</p>'
+    assert doc.to_html() == '<table><tbody><tr><td>new</td></tr></tbody></table><hr><p>new</p>'
 
 
-def test_template_contents_are_mutable_document_fragments():
+def test_template_contents_serialize():
     doc = parse_mdhtml('<template><p>inside</p><template><em>nested</em></template></template>')
     template = doc.children[0]
-    content = template.template_content
-    assert template.children == []
-    assert content is template.template_content and hash(content) == hash(template.template_content)
-    assert content.children[0].parent is content
-    assert content.to_html(pretty=False) == '<p>inside</p><template><em>nested</em></template>'
-    assert doc.to_html(pretty=False) == '<template><p>inside</p><template><em>nested</em></template></template>'
-    with pytest.raises(ValueError, match="ancestor"): content.append_child(template)
-
-    content.children[0].attrs["class"] = "moved"
-    doc.append_child(content.children[0])
-    assert doc.to_html(pretty=False) == '<template><template><em>nested</em></template></template><p class="moved">inside</p>'
+    assert template.name == "template" and template.children == []    # contents live outside the child list
+    assert template.to_text() == "insidenested"
+    assert doc.to_html() == '<template><p>inside</p><template><em>nested</em></template></template>'
 
 
-def test_programmatically_created_templates_and_namespaces():
-    doc = parse_mdhtml("")
-    template = Template("template", {}, namespace="html")
-    template.template_content.append_child(Text("inside"))
-    doc.append_child(template)
-    svg_template = Template("template", {}, namespace="svg")
-    assert svg_template.template_content is None
-    assert doc.to_html(pretty=False) == '<template>inside</template>'
-
-
-def test_justhtml_preserves_html_names_and_comments_that_xml_rejects():
+def test_html_names_and_comments_that_xml_rejects():
     doc = parse_mdhtml('<a zoop:33="x"></a><!-- this is a -- comment -->')
     anchor,comment = doc.children
     assert anchor.attrs["zoop:33"] == "x"
-    assert isinstance(comment, Comment) and "--" in comment.data
-    assert doc.to_html(pretty=False) == '<a zoop:33="x"></a><!-- this is a - - comment -->'
+    assert comment.name == "#comment" and "--" in comment.text
+    assert doc.to_html() == '<a zoop:33="x"></a><!-- this is a -- comment -->'
 
 
 def test_balance_option_is_gone():

@@ -1,7 +1,7 @@
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-from ._html import parse_mdhtml
+from fast5ever import parse_fragment as parse_mdhtml
 from ._native import blocks as _blocks, edit_nodes as _edit_nodes, to_mdhtml as _to_mdhtml
 from .export import math_js, mustache_kind, to_html
 from .md import _normalize_offsets, fill_md, mustache_code, to_md
@@ -47,7 +47,7 @@ def to_dom(markdown: str, *, math: str = "brackets", tagfilter: bool = False, ba
     implicit_figures: bool = False, smart: bool = False, templates: Iterable[TemplateDelimiter] | None = None,
     callbacks: dict | None = None, max_inline_depth: int | None = None,
     max_block_depth: int | None = None, max_link_paren_depth: int | None = None):
-    "Render Markdown into a mutable JustHTML DOM."
+    "Render Markdown into a mutable fast5ever DOM."
     source = _to_mdhtml(markdown, math=math, tagfilter=tagfilter, bare_autolinks=bare_autolinks, auto_ids=auto_ids,
         implicit_figures=implicit_figures, smart=smart, templates=_template_args(templates), callbacks=callbacks,
         max_inline_depth=max_inline_depth, max_block_depth=max_block_depth, max_link_paren_depth=max_link_paren_depth)
@@ -61,7 +61,7 @@ def to_mdhtml(markdown: str, *, math: str = "brackets", tagfilter: bool = False,
     "Render Markdown to an MDHTML fragment."
     return to_dom(markdown, math=math, tagfilter=tagfilter, bare_autolinks=bare_autolinks, auto_ids=auto_ids,
         implicit_figures=implicit_figures, smart=smart, templates=templates, callbacks=callbacks,
-        max_inline_depth=max_inline_depth, max_block_depth=max_block_depth, max_link_paren_depth=max_link_paren_depth).to_html(pretty=False)
+        max_inline_depth=max_inline_depth, max_block_depth=max_block_depth, max_link_paren_depth=max_link_paren_depth).to_html()
 
 
 render = to_mdhtml

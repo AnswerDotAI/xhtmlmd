@@ -9,11 +9,13 @@ mod attrs;
 mod auto_ids;
 mod block;
 mod entity;
+pub mod export_html;
 mod inline;
 mod line;
 #[cfg(feature = "python")]
 mod python;
 mod render;
+pub mod resolve;
 mod smart;
 mod tagfilter;
 mod template;
