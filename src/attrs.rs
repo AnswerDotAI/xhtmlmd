@@ -385,34 +385,39 @@ pub fn valid_link_label(label: &str, allow_empty: bool) -> bool {
     allow_empty || has_nonspace
 }
 
+/// Byte offset of the `{` opening the trailing attr block: the rightmost `{`
+/// whose quote-aware scan closes exactly at the final `}`. Each `{` starts a
+/// candidate parse in its own quote state, so a stray quote in prose cannot
+/// hide the opener (#23), while a quoted `{`/`}` inside an attr value still
+/// cannot end the block. One pass simulates every candidate: candidates in the
+/// same quote state at the same position share a future, so three slots
+/// (rightmost per state) are enough, and a quote char swaps the plain slot
+/// with that quote's slot.
 fn last_attr_open(s: &str) -> Option<usize> {
     let mut esc = false;
-    let mut quote = None;
-    let mut last = None;
+    let (mut plain, mut single, mut double): (Option<usize>, Option<usize>, Option<usize>) =
+        (None, None, None);
+    let mut result = None;
     for (i, ch) in s.char_indices() {
         if esc {
             esc = false;
             continue;
         }
-        if ch == '\\' {
-            esc = true;
-            continue;
-        }
-        if let Some(q) = quote {
-            if ch == q {
-                quote = None;
+        match ch {
+            '\\' => esc = true,
+            '\'' => (plain, single) = (single, plain),
+            '"' => (plain, double) = (double, plain),
+            '{' => plain = Some(i),
+            '}' => {
+                if i == s.len() - 1 {
+                    result = plain;
+                }
+                plain = None;
             }
-            continue;
-        }
-        if ch == '\'' || ch == '"' {
-            quote = Some(ch);
-            continue;
-        }
-        if ch == '{' {
-            last = Some(i);
+            _ => {}
         }
     }
-    last
+    result
 }
 
 fn looks_like_attrs(body: &str, had_colon: bool) -> bool {

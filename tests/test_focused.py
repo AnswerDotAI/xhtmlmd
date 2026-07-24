@@ -116,6 +116,20 @@ def test_attr_gate_requires_marker():
     # key=value only counts when the first token is a pair
     assert_html(to_mdhtml('Text\n{foo k=1}\n'), '<p>Text\n{foo k=1}</p>')
 
+
+def test_trailing_attrs_with_prose_quotes():
+    # A lone quote in heading text must not hide the trailing attr block (#23)
+    assert_html(to_mdhtml('# Alpha\'s beta {k="v"}\n'), '<h1 k="v">Alpha\'s beta</h1>')
+    assert_html(to_mdhtml('# He said "run {k="v"}\n'), '<h1 k="v">He said "run</h1>')
+    # ...nor shift it onto an earlier inline span's brace
+    assert_html(to_mdhtml('# [Alpha]{.cls} the firm\'s charter {k="v"}\n'),
+        '<h1 k="v"><span class="cls">Alpha</span> the firm\'s charter</h1>')
+    assert_html(to_mdhtml("Alpha's beta {k=\"v\"}\n====\n"), '<h1 k="v">Alpha\'s beta</h1>')
+    # quoted braces inside values still shield the opener
+    assert_html(to_mdhtml('# H {a="x{y"}\n'), '<h1 a="x{y">H</h1>')
+    # a block that closes before end of line is not a trailing attr
+    assert_html(to_mdhtml('# H {a="v"} tail}\n'), '<h1>H {a="v"} tail}</h1>')
+
 def test_emphasis_strong_strike_trailing_attrs():
     assert_html(to_mdhtml('a **x**{.c} b\n'), '<p>a <strong class="c">x</strong> b</p>')
     assert_html(to_mdhtml('a *x*{: .c} b\n'), '<p>a <em class="c">x</em> b</p>')
