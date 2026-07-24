@@ -76,6 +76,16 @@ pub struct Document {
     pub footnotes: Vec<Footnote>,
 }
 
+/// A template token found between the tags of a raw HTML block: `start..end`
+/// index its `Block::Html`'s `raw` text.
+#[derive(Clone, Debug, PartialEq)]
+pub struct HtmlToken {
+    pub start: usize,
+    pub end: usize,
+    pub syntax: String,
+    pub body: String,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Footnote {
     pub label: String,
@@ -159,6 +169,7 @@ pub enum Block {
     },
     Html {
         raw: String,
+        tokens: Vec<HtmlToken>,
     },
     HtmlContainer {
         tag: String,

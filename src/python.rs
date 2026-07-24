@@ -130,16 +130,29 @@ fn blocks(
             if let Some(title) = span.title {
                 d.set_item("title", title)?;
             }
+            if let Some(syntax) = span.syntax {
+                d.set_item("syntax", syntax)?;
+                d.set_item("form", "block")?;
+            }
+            if let Some(body) = span.body {
+                d.set_item("body", body)?;
+            }
             Ok(d.unbind())
         })
         .collect()
 }
 
 #[pyfunction]
-#[pyo3(signature = (markdown, *, math = "brackets"))]
-fn edit_nodes(py: Python<'_>, markdown: &str, math: &str) -> PyResult<Vec<Py<PyDict>>> {
+#[pyo3(signature = (markdown, *, math = "brackets", templates = None))]
+fn edit_nodes(
+    py: Python<'_>,
+    markdown: &str,
+    math: &str,
+    templates: Option<Vec<TemplateArg>>,
+) -> PyResult<Vec<Py<PyDict>>> {
     let options = Options {
         math: parse_math_mode(math)?,
+        templates: parse_templates(templates)?,
         ..Options::default()
     };
     let nodes = guard("parsing markdown edit nodes", || {
@@ -221,6 +234,19 @@ fn edit_nodes(py: Python<'_>, markdown: &str, math: &str) -> PyResult<Vec<Py<PyD
                     d.set_item("end", range.end)?;
                     d.set_item("format", format)?;
                     d.set_item("text", text)?;
+                }
+                EditNode::Template {
+                    range,
+                    syntax,
+                    body,
+                } => {
+                    d.set_item("type", "template_token")?;
+                    d.set_item("form", "inline")?;
+                    d.set_item("source", &markdown[range.clone()])?;
+                    d.set_item("start", range.start)?;
+                    d.set_item("end", range.end)?;
+                    d.set_item("syntax", syntax)?;
+                    d.set_item("body", body)?;
                 }
             }
             Ok(d.unbind())
@@ -372,8 +398,29 @@ fn transform_block(block: &mut Block, callbacks: &Bound<'_, PyDict>) -> PyResult
                 }
             }
             Block::Figure { .. } => unreachable!(),
+            Block::Html { raw, tokens } => {
+                if !tokens.is_empty() && callbacks.get_item("template_token")?.is_some() {
+                    let mut new_raw = String::new();
+                    let mut at = 0;
+                    for t in tokens.iter() {
+                        new_raw.push_str(&raw[at..t.start]);
+                        let item = Inline::TemplateToken {
+                            syntax: t.syntax.clone(),
+                            source: raw[t.start..t.end].to_string(),
+                            body: t.body.clone(),
+                        };
+                        match call_inline_callback(&item, callbacks, "inline")? {
+                            Some(html) => new_raw.push_str(&html),
+                            None => new_raw.push_str(&render_inlines(std::slice::from_ref(&item))),
+                        }
+                        at = t.end;
+                    }
+                    new_raw.push_str(&raw[at..]);
+                    *raw = new_raw;
+                    tokens.clear();
+                }
+            }
             Block::CodeBlock { .. }
-            | Block::Html { .. }
             | Block::ThematicBreak { .. }
             | Block::Math { .. }
             | Block::TemplateToken { .. }
@@ -386,7 +433,10 @@ fn transform_block(block: &mut Block, callbacks: &Bound<'_, PyDict>) -> PyResult
         call_block_callback(block, callbacks)?
     };
     if let Some(html) = replacement {
-        *block = Block::Html { raw: html };
+        *block = Block::Html {
+            raw: html,
+            tokens: Vec::new(),
+        };
     }
     Ok(())
 }
@@ -587,7 +637,7 @@ fn block_node<'py>(py: Python<'py>, block: &Block) -> PyResult<Bound<'py, PyDict
             d.set_item("open", code_block_open(attrs, lang.as_deref()))?;
             d.set_item("close", CODE_BLOCK_CLOSE)?;
         }
-        Block::Html { raw } => {
+        Block::Html { raw, .. } => {
             d.set_item("raw", raw)?;
         }
         Block::HtmlContainer {

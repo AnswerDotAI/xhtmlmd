@@ -1,4 +1,4 @@
-"JustHTML integration, including temporary fixes from justhtml#68, justhtml#69, justhtml#70, and justhtml#71."
+"JustHTML integration, including temporary fixes from justhtml#68, justhtml#69, justhtml#70, justhtml#71, and the absent-element scan fix from justhtml#72."
 
 from justhtml import DocumentFragment, JustHTML, Node
 from justhtml.parser import FragmentContext
@@ -65,6 +65,7 @@ _serializer_api.serialize_start_tag = _serialize_start_tag
 
 _original_find_open_index = ParseEngine._find_open_index
 _original_find_open_html_index = ParseEngine._find_open_html_index
+_original_find_open_index_in_current_scope = ParseEngine._find_open_index_in_current_scope
 
 
 def _find_open_index(self, name):
@@ -79,8 +80,15 @@ def _find_open_html_index(self, name):
     return _original_find_open_html_index(self, name)
 
 
+def _find_open_index_in_current_scope(self, name):
+    stack = self._stack
+    if isinstance(stack, _CountingStack) and stack.count_of(name) == 0: return None
+    return _original_find_open_index_in_current_scope(self, name)
+
+
 ParseEngine._find_open_index = _find_open_index
 ParseEngine._find_open_html_index = _find_open_html_index
+ParseEngine._find_open_index_in_current_scope = _find_open_index_in_current_scope
 
 
 def _insert_fragment(self, fragment, reference_node):

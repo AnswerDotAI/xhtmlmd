@@ -40,7 +40,7 @@ python tools/gen_docs.py
 
 Rust renders provisional markup and does no HTML parsing. `python/mdhtml/__init__.py` sends that markup through `parse_mdhtml`; `python/mdhtml/_html.py` owns the JustHTML configuration and integration patches. The README describes the public API and `docs/DIALECT.md` defines the resulting DOM contract.
 
-`python/mdhtml/_html.py` contains temporary copies of fixes submitted as JustHTML PRs #68, #69, #70, and #71. Remove each patch when the minimum JustHTML version includes it.
+`python/mdhtml/_html.py` contains temporary copies of fixes submitted as JustHTML PRs #68, #69, #70, and #71, plus a minimal version of the absent-element stack-scan fix from third-party JustHTML PR #72. Remove each patch when the minimum JustHTML version includes it.
 
 ## Render callbacks
 

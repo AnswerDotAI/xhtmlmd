@@ -7,15 +7,34 @@ marker, so a blockquoted heading passes through (with a warning when it needed r
 import re
 from pathlib import Path
 from bisect import bisect_right
+from dataclasses import astuple, is_dataclass
 
 from ._native import blocks as _blocks, edit_nodes as _edit_nodes
-from .export import HeadingNums, Resolver, _normalize_offsets, group_plan, ref_tokens, ref_variant
+from .export import HeadingNums, Resolver, group_plan, ref_tokens, ref_variant
 
-__all__ = ["to_md"]
+__all__ = ["to_md", "mustache_code", "fill_md"]
 
 _RAW_INFO = re.compile(r"\{=[A-Za-z0-9_-]+\}")
 _DIV_FENCE = re.compile(r":{3,}\s*")
 _SETEXT = re.compile(r"\s{0,3}(=+|-+)\s*")
+
+
+def _normalize_offsets(src: str) -> tuple[str, list[int]]:
+    out, offsets = [], [0]
+    i = 0
+    while i < len(src):
+        start = i
+        if src[i] == "\r":
+            n = 2 if i + 1 < len(src) and src[i + 1] == "\n" else 1
+            ch = "\n"
+            i += n
+        else:
+            ch = src[i]
+            i += 1
+        out.append(ch)
+        offsets.extend([start] * (len(ch.encode()) - 1))
+        offsets.append(i)
+    return "".join(out), offsets
 
 
 class Md(str):
@@ -40,9 +59,10 @@ def _is_caption(line):
 
 
 class _MdExporter:
-    def __init__(self, reftypes, number_headings, math, implicit_figures):
+    def __init__(self, reftypes, number_headings, math, implicit_figures, templates=None, tmpl=None):
         self.res = Resolver(reftypes)
         self.number_headings, self.math, self.implicit_figures = number_headings, math, implicit_figures
+        self.templates, self.tmpl = [astuple(t) if is_dataclass(t) else tuple(t) for t in templates or []], tmpl
         self.warnings, self.inline, self.block, self.rebuilt = [], [], [], []
 
     def run(self, src):
@@ -50,13 +70,15 @@ class _MdExporter:
         self.lines = src.split("\n")
         self.starts = [0]
         for line in self.lines: self.starts.append(self.starts[-1] + len(line.encode()) + 1)
-        spans = sorted(_blocks(src, math=self.math, implicit_figures=self.implicit_figures, nested=True), key=lambda b: b['start'])
-        nodes = _edit_nodes(src, math=self.math)
+        spans = sorted(_blocks(src, math=self.math, implicit_figures=self.implicit_figures, nested=True,
+            templates=self.templates), key=lambda b: b['start'])
+        nodes = _edit_nodes(src, math=self.math, templates=self.templates)
         if self.implicit_figures: spans = sorted(spans + self._nested_figures(spans, nodes), key=lambda b: b["start"])
         self._index(spans, nodes)
         for n in nodes:
             if n["type"] == "attrs": self.inline.append((n["start"], n["end"], ""))
             elif n["type"] == "raw_inline": self.inline.append((n["start"], n["end"], n["text"] if n["format"] == "md" else ""))
+            elif n["type"] == "template_token" and self.tmpl: self.inline.append((n["start"], n["end"], self.tmpl(n["body"], n["syntax"], "inline")))
         for x, parsed in self.xrefs: self._xref(x, parsed)
         for b in spans: self._block(b)
         keep = [e for e in self.inline if not any(s <= e[0] and e[1] <= t for s, t in self.rebuilt)]
@@ -152,6 +174,10 @@ class _MdExporter:
         t, s, e = b["type"], b["start"], b["end"]
         if t in ("attr_def", "abbr_def"): self.block.append((*self._chars(s, e), ""))
         elif t == "paragraph": self._strip_edge_ials(s, e)
+        elif t == "template_token" and self.tmpl:
+            cs, ce = self._chars(s, e)
+            self.block.append((cs, ce, self.tmpl(b["body"], b["syntax"], "block") + "\n"))
+            self.rebuilt.append((cs, ce))
         elif t == "div":
             self.block.append((*self._chars(s, s + 1), ""))
             if e - s > 1 and _DIV_FENCE.fullmatch(self.lines[e - 1]): self.block.append((*self._chars(e - 1, e), ""))
@@ -194,15 +220,88 @@ class _MdExporter:
             self.block.append((p, p, f"\n{label} {n}\n"))
 
 
+def _fill_tokens(normalized, tmpls, starts, srcb):
+    "All template tokens as byte-span dicts: block spans, plus inline nodes not already covered by one."
+    blks = [dict(start=starts[b["start"]], end=min(starts[b["end"]], len(srcb)), body=b["body"], block=True)
+        for b in _blocks(normalized, templates=tmpls, nested=True) if b["type"] == "template_token"]
+    covered = lambda n: any(b["start"] <= n["start"] and n["end"] <= b["end"] for b in blks)
+    inl = [n for n in _edit_nodes(normalized, templates=tmpls) if n["type"] == "template_token" and not covered(n)]
+    toks = blks + [dict(start=n["start"], end=n["end"], body=n["body"], block=False) for n in inl]
+    return sorted(toks, key=lambda t: t["start"])
+
+
+def fill_md(src, values, dest=None, templates=None, strict=True) -> Md:
+    """Fill mustache-style template tokens in Markdown source with `values`, leaving all other
+    source (refs, attributes, everything symbolic) byte-identical. Variables take `str(values[name])`;
+    `{{#name}}`/`{{^name}}`...`{{/name}}` sections keep or drop their whole span by the truthiness of
+    `values[name]` (no iteration; a kept section just loses its markers). `templates` defaults to
+    `MUSTACHE`. With `strict`, fields missing in either direction raise; otherwise they are reported
+    in `.warnings` and unfilled variables stay in place, ready for a later pass."""
+    if templates is None: from . import MUSTACHE as templates
+    tmpls = [astuple(t) if is_dataclass(t) else tuple(t) for t in templates]
+    normalized, offsets = _normalize_offsets(src)
+    srcb = normalized.encode()
+    starts = [0]
+    for line in normalized.split("\n"): starts.append(starts[-1] + len(line.encode()) + 1)
+    edits, removals, stack, seen, unfilled = [], [], [], set(), []
+
+    def rm(cs, ce):
+        "Remove `cs..ce`, consuming following blank lines when the removal sits at a paragraph boundary."
+        if cs < 2 or srcb[cs - 2:cs] == b"\n\n":
+            while srcb[ce:ce + 1] == b"\n": ce += 1
+        edits.append((cs, ce, ""))
+        return cs, ce
+
+    for t in _fill_tokens(normalized, tmpls, starts, srcb):
+        body = t["body"].strip()
+        sig, name = body[:1], body[1:].strip()
+        if sig in "#^": stack.append((name, sig, t))
+        elif sig == "/":
+            if not stack or stack[-1][0] != name: raise ValueError(f"unmatched section marker {{{{{body}}}}}")
+            _, osig, ot = stack.pop()
+            seen.add(name)
+            if name not in values: unfilled.append((name, ot["start"]))
+            if bool(values.get(name)) == (osig == "#"):
+                rm(ot["start"], ot["end"])
+                rm(t["start"], t["end"])
+            else: removals.append(rm(ot["start"], t["end"]))
+        else:
+            seen.add(body)
+            if body in values:
+                v = str(values[body])
+                edits.append((t["start"], t["end"], v + "\n" if t["block"] else v))
+            else: unfilled.append((body, t["start"]))
+    if stack: raise ValueError(f"unclosed section marker {{{{{stack[-1][1]}{stack[-1][0]}}}}}")
+    gone = lambda s, e=None: any(rs <= s and (e or s) <= re for rs, re in removals)
+    warnings = []
+    if missing := list(dict.fromkeys(n for n, pos in unfilled if not gone(pos))):
+        warnings.append("fields not in values: " + ", ".join(missing))
+    if unused := [k for k in values if k not in seen]: warnings.append("values not in document: " + ", ".join(unused))
+    if warnings and strict: raise ValueError("; ".join(warnings))
+    edits = [e for e in edits if e[2] == "" and (e[0], e[1]) in removals or not gone(e[0], e[1])]
+    for cs, ce, repl in sorted(edits, reverse=True): src = src[:offsets[cs]] + repl + src[offsets[ce]:]
+    res = Md(src, warnings)
+    if dest is not None: Path(dest).write_text(res, encoding="utf-8")
+    return res
+
+
+
+def mustache_code(body, syntax, form):
+    "Mustache tokens wrapped in code spans, so they render literally everywhere (safe even from legacy underscore emphasis)"
+    return "`{{" + body + "}}`"
+
+
 def to_md(src, dest=None, reftypes: dict | None = None, number_headings=None, math: str = "brackets",
-    implicit_figures: bool = False) -> Md:
+    implicit_figures: bool = False, templates=None, tmpl=None) -> Md:
     """Lower Markdown to portable GFM-plus-footnotes by rewriting mdhtml-specific constructs in
     place: cross-references become plain text, headings and captions are numbered, attribute
     lists and definitions are stripped, `{=md}` raw data is spliced, and grid tables drop to
-    their MDHTML rendering. All other source text is preserved byte-for-byte. Returns an `Md`
-    str carrying `.warnings`; `dest` also writes it to a file."""
+    their MDHTML rendering. With `templates`, each template token is rewritten to whatever the
+    `tmpl` callable `(body, syntax, form) -> str` returns (`mustache_code` is a ready-made recipe;
+    without `tmpl`, tokens pass through). All other source text is preserved byte-for-byte.
+    Returns an `Md` str carrying `.warnings`; `dest` also writes it to a file."""
     normalized, offsets = _normalize_offsets(src)
-    ex = _MdExporter(reftypes, number_headings, math, implicit_figures)
+    ex = _MdExporter(reftypes, number_headings, math, implicit_figures, templates, tmpl)
     edits = ex.run(normalized)
     for start, end, repl in reversed(edits): src = src[:offsets[start]] + repl + src[offsets[end]:]
     res = Md(src, ex.warnings)

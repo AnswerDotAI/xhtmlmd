@@ -1,6 +1,6 @@
 import pytest
 
-from mdhtml import math_js, parse_mdhtml, to_html, to_md, to_mdhtml
+from mdhtml import JINJA, MUSTACHE, math_js, mustache_kind, parse_mdhtml, to_html, to_md, to_mdhtml
 
 REFS_MD = """# Payment {#sec-pay}
 
@@ -143,6 +143,7 @@ def test_refs_ids():
     assert '<a href="#sec-b" class="xref">Clause sec-b</a>' in h     # author text kept as prefix
     assert '<a href="#fig-e" class="xref">fig-e</a> and <a href="#sec-nope" class="xref">sec-nope</a>' in h
     assert 'heading-number' not in h and h.warnings == []            # no numbering, no registry, nothing to fail
+    assert 'caption-label' not in h and '<figcaption>E</figcaption>' in h   # captions as authored: no registry, numbers would lie
     with pytest.raises(ValueError): to_html(src, refs='nope')
 
 
@@ -156,6 +157,15 @@ def test_id_prefix():
     assert 'id="md-fnref-1"' in h and 'href="#md-fn-1"' in h and 'id="md-fn-1"' in h and 'href="#md-fnref-1"' in h
     hr = to_html(to_mdhtml('# A {#sec-a}\n\nSee [@sec-a].'), id_prefix='p-')
     assert '<a href="#p-sec-a">Section 1</a>' in hr                  # resolve mode prefixes via fragment membership
+
+
+def test_fn_salt():
+    src = to_mdhtml('Hi[^1].\n\n[^1]: B\n')
+    h = to_html(src, id_prefix='md-', fn_salt='m7-')
+    assert 'id="md-m7-fnref-1"' in h and 'href="#md-m7-fn-1"' in h    # footnote ids carry the per-fragment salt
+    assert 'id="md-m7-fn-1"' in h and 'href="#md-m7-fnref-1"' in h    # both directions stay paired
+    h2 = to_html(to_mdhtml('# A {#sec-a}\n\nHi[^1].\n\n[^1]: B\n'), refs='ids', id_prefix='md-', fn_salt='m8-')
+    assert 'id="md-sec-a"' in h2 and 'md-m8-sec-a' not in h2          # salt touches only the footnote namespace
 
 
 def test_to_md_refs_and_numbering():
@@ -211,3 +221,37 @@ def test_to_md_passthrough():
     md = ('Text[^1] with $x$ math and | pipes |.\n\n[^1]: A note.\n\n'
         '| A | B |\n|---|---|\n| 1 | 2 |\n\n- [x] done\n\n[ref link][r]\n\n[r]: /url\n')
     assert to_md(md, math='dollars') == md   # nothing to lower: byte-identical
+
+
+def test_template_grammar():
+    h = to_mdhtml('Hi {{name}} and {{#s}}x{{/s}}', templates=MUSTACHE)
+    assert '<template data-template="mustache">name</template>' in h
+    hj = to_mdhtml('V {{ v }} S {% if x %}', templates=JINJA)
+    assert '<template data-template="jinja"> v </template>' in hj
+    assert '<template data-template="jinja-stmt"> if x </template>' in hj
+    assert [mustache_kind(b) for b in ('name', '#s', '/s', '^s', ' #s ')] == ['var', 'section', 'section', 'section', 'section']
+
+
+def test_to_md_templates():
+    from mdhtml import mustache_code
+    md = 'Pay {{sal}} now.\n\n{{#opt}}\n\nGranted {{n}}, not `{{code}}`.\n\n{{/opt}}\n'
+    assert to_md(md, templates=MUSTACHE) == md                    # no tmpl: byte-identical
+    out = to_md(md, templates=MUSTACHE, tmpl=mustache_code)
+    assert 'Pay `{{sal}}` now.' in out
+    assert '`{{#opt}}`\n' in out and '`{{/opt}}`\n' in out        # block-form tokens rewritten on their own lines
+    assert 'Granted `{{n}}`, not `{{code}}`.' in out              # code spans never treated as tokens
+
+
+def test_fill_md():
+    from mdhtml import fill_md
+    md = 'Pay {{sal}} to {{who}} per [@sec-a].\n\n{{#opt}}\nGranted {{n}}.\n{{/opt}}\n\n{{#rsu}}\nAlso {{m}} units.\n{{/rsu}}\n\n{{^opt}}\nNo grant.\n{{/opt}}\n\nDone.\n'
+    out = fill_md(md, dict(sal='$1', who='Sam', opt=True, rsu=False, n='9'))
+    assert out == 'Pay $1 to Sam per [@sec-a].\n\nGranted 9.\n\nDone.\n'   # refs stay symbolic; falsy spans and their vars gone
+    assert out.warnings == []
+    with pytest.raises(ValueError, match='who.*zap'): fill_md('Hi {{who}}.\n', dict(zap=1))
+    part = fill_md('Hi {{who}} on {{when}}.\n', dict(who='Sam'), strict=False)
+    assert part == 'Hi Sam on {{when}}.\n'                        # unfilled token survives for a later pass
+    assert part.warnings == ['fields not in values: when']
+    tbl = '<table class="sig">\n<tr><td>Name: {{who}}</td><td>Date: {{when}}</td></tr>\n</table>\n\nAfter [@sec-a].\n'
+    out2 = fill_md(tbl, dict(who='Sam', when='today'))
+    assert out2 == tbl.replace('{{who}}', 'Sam').replace('{{when}}', 'today')   # raw-HTML tables fill too

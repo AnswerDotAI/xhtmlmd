@@ -118,7 +118,15 @@ impl<'a> Renderer<'a> {
                 template_html(syntax, body, out);
                 out.push('\n');
             }
-            Block::Html { raw } => out.push_str(raw),
+            Block::Html { raw, tokens } => {
+                let mut at = 0;
+                for t in tokens {
+                    out.push_str(&raw[at..t.start]);
+                    template_html(&t.syntax, &t.body, out);
+                    at = t.end;
+                }
+                out.push_str(&raw[at..]);
+            }
             Block::HtmlContainer {
                 tag,
                 attrs,

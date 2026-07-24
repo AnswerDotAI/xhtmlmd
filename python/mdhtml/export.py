@@ -11,7 +11,7 @@ from ._html import parse_mdhtml
 try: from fastpylight import highlight, highlight_spans
 except ImportError: highlight = highlight_spans = None
 
-__all__ = ["SCHEMES", "REFTYPES", "ref_tokens", "ref_variant", "decode_raw", "group_plan", "HeadingNums", "Resolver", "to_html", "math_js"]
+__all__ = ["SCHEMES", "REFTYPES", "ref_tokens", "ref_variant", "decode_raw", "group_plan", "mustache_kind", "HeadingNums", "Resolver", "to_html", "math_js"]
 
 
 SCHEMES = dict(decimal={".".join(f"%{j}" for j in range(1, i + 2)): "decimal" for i in range(6)}, legal={
@@ -50,6 +50,11 @@ def group_plan(types):
     "Per-item `(separator, prefix?, plural?)` for a `data-refs` group: one pluralized prefix for a same-type group, per-item prefixes for mixed."
     n, mixed = len(types), len(set(types)) > 1
     return [("" if not i else " and " if i == n - 1 else ", ", mixed or not i, not mixed and n > 1) for i in range(n)]
+
+
+def mustache_kind(body):
+    "'section' when a mustache token body opens, closes, or inverts a section (`#`/`/`/`^` sigil), else 'var'."
+    return "section" if body.strip()[:1] in "#/^" else "var"
 
 
 def _letter(n): return chr(ord("a") + (n - 1) % 26) * ((n - 1) // 26 + 1)
@@ -175,10 +180,10 @@ def _insert_first(el, node): el.insert_before(node, el.children[0] if el.childre
 
 
 class _Exporter(Resolver):
-    def __init__(self, reftypes, number_headings, hl, toc, refs="resolve", id_prefix="", hl_lang=None, code_wrap=None):
+    def __init__(self, reftypes, number_headings, hl, toc, refs="resolve", id_prefix="", fn_salt="", hl_lang=None, code_wrap=None):
         super().__init__(reftypes)
         self.number_headings, self.hl, self.toc, self.refs = number_headings, hl, toc, refs
-        self.id_prefix, self.hl_lang, self.code_wrap = id_prefix, hl_lang, code_wrap
+        self.id_prefix, self.fn_salt, self.hl_lang, self.code_wrap = id_prefix, fn_salt, hl_lang, code_wrap
         self.warnings = []
 
     def run(self, root):
@@ -196,8 +201,8 @@ class _Exporter(Resolver):
         if self.refs == "resolve":
             refs = [(a, self._parse_ref(a)) for g in groups for a in _els(g) if a.name == "a"]
             refs += [(a, self._parse_ref(a)) for a in singles]
-        self._number_headings(refs)
-        self._number_captions([e for e in els if e.name in ("figure", "table")])
+            self._number_headings(refs)
+            self._number_captions([e for e in els if e.name in ("figure", "table")])
         if self.refs == "resolve":
             for g in groups: self._lower_group(g)
             for a in singles:
@@ -289,12 +294,13 @@ class _Exporter(Resolver):
 
     def _prefix_ids(self, els):
         "Namespace ids under `id_prefix`: every element id (original kept in `data-id`), plus links to in-fragment ids."
-        if not self.id_prefix: return
+        if not (self.id_prefix or self.fn_salt): return
         ids = {i for e in els if (i := e.attrs.get("id"))}
+        pfx = lambda i: self.id_prefix + (self.fn_salt if i.startswith(("fn-", "fnref-")) else "")
         for e in els:
-            if i := e.attrs.get("id"): e.attrs.update({"id": self.id_prefix + i, "data-id": i})
+            if i := e.attrs.get("id"): e.attrs.update({"id": pfx(i) + i, "data-id": i})
             if e.name == "a" and (h := e.attrs.get("href") or "").startswith("#") and h[1:] in ids:
-                e.attrs["href"] = f"#{self.id_prefix}{h[1:]}"
+                e.attrs["href"] = f"#{pfx(h[1:])}{h[1:]}"
 
     def _raw(self, scripts):
         for el in scripts:
@@ -370,40 +376,24 @@ class _Exporter(Resolver):
 
 
 def to_html(src, dest=None, reftypes: dict | None = None, number_headings=None, hl: str | None = "spans",
-    toc: bool = False, refs: str = "resolve", id_prefix: str = "", hl_lang=None, code_wrap=None) -> Html:
+    toc: bool = False, refs: str = "resolve", id_prefix: str = "", fn_salt: str = "", hl_lang=None, code_wrap=None) -> Html:
     """Lower MDHTML (a string or DocumentFragment; never mutated) to finished HTML: cross-references
     baked as links, headings and captions numbered, `{=html}` raw data spliced, `colwidths` lowered,
     and code highlighted. `refs='ids'` instead bakes each reference as a working link showing its
     target id (class `xref`), with no registry, numbering, or failure modes - for live-preview
     contexts where targets may sit outside the fragment. `id_prefix` namespaces the output's ids:
     every element id is prefixed (original kept in `data-id`), along with ref hrefs and links to
-    in-fragment ids; links to outside ids are untouched. Per code block, `hl_lang(text, lang)` may
+    in-fragment ids; links to outside ids are untouched. `fn_salt` is an extra prefix for footnote
+    ids only (`fn-*`/`fnref-*`), so fragments sharing one `id_prefix` keep their footnote pairs
+    distinct. Per code block, `hl_lang(text, lang)` may
     return a corrected language (`lang` is None for a bare fence), and `code_wrap(html, lang, text)`
     may return replacement markup for the highlighted block (None keeps it; `text` is unescaped).
     Returns an `Html` str carrying `.warnings`; `dest` also writes it to a file."""
     if refs not in ("resolve", "ids"): raise ValueError(f"unknown refs mode {refs!r}")
     if not isinstance(src, str): src = src.to_html(pretty=False)
     root = parse_mdhtml(src)
-    ex = _Exporter(reftypes, number_headings, hl, toc, refs, id_prefix, hl_lang, code_wrap)
+    ex = _Exporter(reftypes, number_headings, hl, toc, refs, id_prefix, fn_salt, hl_lang, code_wrap)
     ex.run(root)
     res = Html(root.to_html(pretty=False), ex.warnings)
     if dest is not None: Path(dest).write_text(res, encoding="utf-8")
     return res
-
-
-def _normalize_offsets(src: str) -> tuple[str, list[int]]:
-    out, offsets = [], [0]
-    i = 0
-    while i < len(src):
-        start = i
-        if src[i] == "\r":
-            n = 2 if i + 1 < len(src) and src[i + 1] == "\n" else 1
-            ch = "\n"
-            i += n
-        else:
-            ch = src[i]
-            i += 1
-        out.append(ch)
-        offsets.extend([start] * (len(ch.encode()) - 1))
-        offsets.append(i)
-    return "".join(out), offsets

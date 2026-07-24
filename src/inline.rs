@@ -49,6 +49,11 @@ pub enum EditNode {
         format: String,
         text: String,
     },
+    Template {
+        range: Range<usize>,
+        syntax: String,
+        body: String,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -72,7 +77,8 @@ impl EditNode {
             Self::Math { range, .. }
             | Self::Xref { range, .. }
             | Self::Attrs { range, .. }
-            | Self::RawInline { range, .. } => {
+            | Self::RawInline { range, .. }
+            | Self::Template { range, .. } => {
                 range.start += offset;
                 range.end += offset;
             }
@@ -85,6 +91,17 @@ pub fn find_edit_nodes(src: &str, ctx: &InlineContext<'_>) -> Vec<EditNode> {
     let mut failed = FailedScans::default();
     let mut i = 0;
     while i < src.len() {
+        if !starts(src, i, "`")
+            && let Some((token, next)) = token_at(src, i, &ctx.options.templates, false)
+        {
+            out.push(EditNode::Template {
+                range: i..next,
+                syntax: token.syntax,
+                body: token.body,
+            });
+            i = next;
+            continue;
+        }
         if starts(src, i, "\\[")
             && matches!(ctx.options.math, MathMode::Brackets | MathMode::Dollars)
             && let Some(end) = memo_find_unescaped(&mut failed.bracket, src, i + 2, "\\]")

@@ -56,7 +56,8 @@ def test_template_delimiter_forms_and_block_spans():
     assert_html(to_mdhtml("{{ title }}", templates=block, callbacks={"template_token": lambda node, default: seen.append(node)}),
         '<template data-template="mustache"> title </template>')
     assert seen == [dict(type="template_token", syntax="mustache", source="{{ title }}", body=" title ", form="block")]
-    assert blocks("{{ title }}", templates=auto) == [dict(type="template_token", start=0, end=1)]
+    assert blocks("{{ title }}", templates=auto) == [dict(type="template_token", start=0, end=1,
+        syntax="mustache", form="block", body=" title ")]
 
 
 def test_balanced_template_delimiters_ignore_quotes_and_preserve_opaque_text():
@@ -74,7 +75,29 @@ def test_unmatched_escaped_and_code_template_openers_stay_literal():
     assert_html(to_mdhtml("`{{name}}`", templates=delimiters), "<p><code>{{name}}</code></p>")
     assert "data-template" not in to_mdhtml("```\n{{name}}\n```", templates=delimiters)
     assert isinstance(to_dom("<span>{{name}}</span>", templates=delimiters).children[0].children[0].children[0], Template)
-    assert "data-template" not in to_mdhtml("<div>\n{{name}}\n</div>", templates=delimiters)
+    assert '<template data-template="mustache">name</template>' in to_mdhtml("<div>\n{{name}}\n</div>", templates=delimiters)
+
+
+def test_templates_in_raw_html_blocks():
+    delimiters = [TemplateDelimiter("mustache", "{{", "}}")]
+    h = to_mdhtml("<table>\n<tr><td>Hi {{who}}</td><td>{{x}}</td></tr>\n</table>\n", templates=delimiters)
+    assert "<td>Hi <template data-template=\"mustache\">who</template></td>" in h
+    seen = []
+    to_mdhtml("<table>\n<tr><td>{{who}}</td></tr>\n</table>\n", templates=delimiters,
+        callbacks={"template_token": lambda node, default: seen.append(node) or "<b>W</b>"})
+    assert seen == [dict(type="template_token", syntax="mustache", source="{{who}}", body="who", form="inline")]
+    h2 = to_mdhtml("<table>\n<tr><td>{{who}}</td></tr>\n</table>\n", templates=delimiters,
+        callbacks={"template_token": lambda node, default: "<b>W</b>"})
+    assert "<td><b>W</b></td>" in h2                                          # callback replacement lands in the cell
+    opaque = to_mdhtml("<div data-x=\"{{a}}\">\n<script>\nvar v = {{b}};\n</script>\n<!-- {{c}} -->\n{{d}}\n</div>\n",
+        templates=delimiters)
+    assert '{{a}}' in opaque and '{{b}}' in opaque and '{{c}}' in opaque      # attrs, raw-text content, comments: opaque
+    assert '<template data-template="mustache">d</template>' in opaque
+    ell = to_mdhtml('<div>\nsee ("</…>") and {{tok}}\n</div>\n', templates=delimiters)
+    assert '<!--…-->' in ell                                             # `</…` panics no more; WHATWG makes the bogus tag a comment
+    assert '<template data-template="mustache">tok</template>' in ell
+    raw = to_mdhtml('<div>\n<script>x</… {{a}}</script>{{b}}\n</div>\n', templates=delimiters)
+    assert '{{a}}' in raw and '<template data-template="mustache">b</template>' in raw
 
 
 def test_template_delimiter_validation():

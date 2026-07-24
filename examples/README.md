@@ -1,0 +1,55 @@
+# Examples
+
+A worked demonstration of the mdhtml pipeline end to end: one source document, every output register.
+
+## The document
+
+`legal_demo.ipynb` is a small offer-letter template written as a solveit dialog (five Markdown
+notes in an `.ipynb`). It exercises the dialect features that matter across converters:
+
+- Headings with ids (`## Compensation {#sec-comp}`) referenced from *other* notes: single refs
+  (`[@sec-offer]`), a group (`[@sec-comp; @sec-equity; @sec-atwill]`), and custom text
+  (`[your cash compensation @sec-comp]`).
+- Mustache template tokens: inline variables (`{{base_salary}}`) and block section markers
+  (`{{#equity.options}}` ... `{{/equity.options}}`).
+- A footnote, for id-namespacing to exercise.
+
+## The build script
+
+`render_demo.py` reads the notes and renders each register. Run it from this folder (or anywhere -
+paths are script-relative); it rewrites the outputs beside itself:
+
+| file | register | how |
+|---|---|---|
+| `legal_demo.md` | dialect source | the notes, concatenated verbatim |
+| `legal_demo-render.md` | portable Markdown | `to_md`: refs baked to "Section 1.(a)" text, numbered headings, tokens code-wrapped via `mustache_code` |
+| `legal_demo.html` | HTML | `to_html`: refs as live links, numbered headings, variables as `<input>` boxes and section markers as `<code>` via a local `template_token` callback |
+| `legal_demo.docx` | Word, mail-merge | `mdhtml2docx.convert(tmpl=mustache_fields)`: refs as live `REF` fields, variables as `MERGEFIELD`s (Mailings tab: attach a CSV whose header row is the field names, Preview Results, Finish & Merge) |
+| `legal_demo-form.docx` | Word, interactive form | a local four-line callable returning `('control', name)`: variables become grey click-and-type content controls |
+| `legal_demo-bound.docx` | Word, synced form | the same callable shape returning `('bound', name)`: controls data-bind to one XML node per variable, so filling `{{company_common_name}}` once updates every usage live, and filled values are machine-readable from the docx's `customXml/item1.xml` |
+| `legal_demo.typ` | Typst | `to_typst`: refs as live `#ref`s Typst resolves at compile time, a generated legal-numbering rule, footnotes as `#footnote`, tokens as monospace literals |
+| `legal_demo.pdf` | PDF | `to_pdf`: the same markup compiled by the `typst` CLI - the finished, typeset register |
+| `legal_demo-filled.md`, `legal_demo-filled.pdf` | filled document | `filldemo.py`: `fill_md` resolves the variables and sections from a plain dict (still-symbolic Markdown out; missing fields warn or raise in both directions), then the normal PDF pipeline typesets it - `signature_date` is deliberately left for a later fill pass |
+
+The pattern to notice: mdhtml owns the *grammar* (the `MUSTACHE` delimiters and the
+`mustache_kind` sigil classifier), each converter owns a *contract* (parse callbacks for HTML,
+the `tmpl` callable for docx, `tmpl` on `to_md`), and each register is a few-line callable
+composing the two. Adding a register - DocuSign anchors, say - is another small callable,
+not a converter change.
+
+The three baked registers tell one liveness story from the same source: Markdown bakes refs
+to *text*, HTML bakes them to *links*, docx bakes them to *fields* that Word keeps live.
+
+The signature block at the letter's end is a raw HTML table in the source - multi-line cells
+with no alignment gymnastics, and `fill_md` reaches inside it since template tokens are
+recognized between tags in raw HTML. Its `custom-style="Borderless Table"` picks the borderless
+table style each converter owns: a reference style in docx, a `table_styles=` entry for Typst
+(`stroke: none`), a CSS rule keyed on `.sig-block` in HTML. The `<br>` rows reserve signing
+space, and ordinary text keeps flowing after the table.
+
+## The other files
+
+- `examples.ipynb` - a notebook rendering the feature examples from `docs/sample.md` through
+  `to_mdhtml`, for eyeballing the raw MDHTML output.
+- `demo.md` - a minimal dialect scrap (task list, fenced div, math) handy for quick CLI runs:
+  `mdhtml examples/demo.md`.

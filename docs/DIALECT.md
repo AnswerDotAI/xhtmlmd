@@ -1,6 +1,6 @@
 # Markdown and MDHTML dialect
 
-MDHTML is the small HTML dialect produced by `mdhtml` and consumed by `mdhtml2*` converters. It represents the document structure and annotations needed by those converters; it is not a source-preserving Markdown AST.
+MDHTML is the small HTML dialect produced by `mdhtml` and consumed by converters: the in-package `to_html` and `to_md` exporters, and external `mdhtml2*` packages. It represents the document structure and annotations those converters need; it is not a source-preserving Markdown AST.
 
 This document defines both sides of the mapping. Unless stated otherwise, Markdown follows CommonMark/GFM, with Pandoc-compatible choices for extensions.
 
@@ -252,6 +252,8 @@ MDHTML:
 
 The text is the source math notation, not MathML. A callback may instead return MathML; JustHTML then applies the standard HTML foreign-content rules.
 
+The carriers are the whole contract: each converter decides how to render the notation. The HTML exporter leaves them in place for client-side rendering, and `math_js(fn=None, **opts)` returns the matching renderer as a string - a guarded per-node KaTeX pass over the carriers (`fn=` names the function instead of invoking it immediately; keyword options merge into the `katex.render` call).
+
 ## Footnotes and abbreviations
 
 Markdown:
@@ -306,6 +308,10 @@ The presence of `data-ref` marks a reference. No token selects the default full 
 The Markdown `{ref=...}` key is consumed when lowering a reference. On any other element it passes through as an ordinary attribute. Pandoc's established `task-list`, `math inline`, `footnote-ref`, and `footnotes` annotations remain classes; MDHTML-specific annotations use `data-*` attributes.
 
 The parser does not resolve numbers or require targets to exist. Converters report an unresolved target as a conversion error when their output format supports live references.
+
+The shipped exporters lower references from one shared vocabulary (`mdhtml.export`) at three levels of liveness: `mdhtml2docx` bakes REF fields Word keeps live, `to_html` bakes links with computed text, and `to_md` bakes plain text. Prefix words come from `REFTYPES` (`sec`, `fig`, `tbl`; extended per call with `reftypes=`) and heading numbering from `SCHEMES` (`'legal'`, `'decimal'`, or a `{lvlText: numFmt}` dict). `number_headings=None` means automatic: headings are numbered exactly when some reference needs a heading number.
+
+`to_html` also offers `refs='ids'` for live-preview contexts where targets may sit outside the fragment: each reference bakes as a working link showing its target id (class `xref`), with no registry, numbering, or failure modes - and captions render as authored, since per-fragment numbers would lie. `id_prefix` namespaces the fragment's ids against a host page (the authored id kept in `data-id`), and `fn_salt` adds a further prefix to the `fn-*`/`fnref-*` footnote namespace only, keeping footnote pairs distinct across fragments that share one `id_prefix`.
 
 ## Raw HTML and Markdown in HTML
 
@@ -385,7 +391,9 @@ preserves `${make({"x": "}"})}` with body `make({"x": "}"})`.
 
 The default `form="auto"` makes a token a body-level carrier when it is the only non-whitespace content on its source line; otherwise it is inline. `form="inline"` always produces an inline carrier, including on a line by itself. `form="block"` recognizes only whole-line tokens, leaving an embedded opener literal. No form attribute is serialized: a carrier in body position is block, while one inside phrasing content is inline, subject to the body-run rule above. A `template_token` callback receives `syntax`, exact `source`, delimiter-free `body`, and the resolved `form`, either `inline` or `block`. `blocks()` reports a top-level block carrier as `template_token` when given the same delimiter configuration.
 
-Recognition occurs only in Markdown text positions. A configured opener takes precedence over other inline syntax. Code spans, fenced and indented code blocks, raw HTML tags and non-Markdown HTML blocks, raw converter payloads, and attribute values remain opaque. Markdown text between inline HTML tags remains a text position and can contain tokens. Delimiter changes made by a template language are not supported. MDHTML validates neither template-language grammar nor section pairing, and it does not promise source reconstruction after conversion.
+Recognition occurs in Markdown text positions, and in the text between tags inside raw HTML blocks. A configured opener takes precedence over other inline syntax. Code spans, fenced and indented code blocks, raw converter payloads, tag internals (including attribute values), comments, CDATA sections, and the content of raw-text elements (`script`, `style`, `textarea`, ...) remain opaque. Markdown text between inline HTML tags remains a text position and can contain tokens; a token inside a raw HTML block always yields an inline carrier in place. Delimiter changes made by a template language are not supported. MDHTML validates neither template-language grammar nor section pairing, and it does not promise source reconstruction after conversion.
+
+Converters render tokens through caller-supplied callables rather than built-in language knowledge. The HTML exporter's path is the `template_token` callback above. `to_md(tmpl=)` takes `(body, syntax, form)` and returns replacement Markdown text. `mdhtml2docx`'s `convert(tmpl=)` takes the same signature and returns a literal text run (`str`), a live field (`('field', instr)`), an interactive plain-text content control (`('control', name)`), a control data-bound to a shared custom-XML store so repeats sync (`('bound', name)`), or `None` to drop the token. The library ships grammar helpers, not policies: the `MUSTACHE` and `JINJA` delimiter constants, the `mustache_kind` sigil classifier, and the recipes `mustache_code` (code-span wrapping for Markdown), `mustache_fields` (MERGEFIELDs), and `jinja_literal` (respaced literals).
 
 ## HTML template elements
 

@@ -248,9 +248,9 @@ html = to_html(to_mdhtml(markdown), number_headings='legal')
 
 The result is still a body fragment (a str subclass carrying a `warnings` list; pass `dest=` to also write a file). `to_html` accepts an MDHTML string or a JustHTML `DocumentFragment`, never mutates its input, and applies:
 
-- Cross-references become real links with baked text: `[@sec-pay]` renders as `<a href="#sec-pay">Section 1.</a>`, groups join as "Sections 1. and 1.(a)", and figure and table targets get "Figure 1"-style text. `reftypes=dict(exh=('Exhibit', 'Exhibits'))` adds prefix words beyond the built-in `sec`, `fig`, and `tbl`. A missing target, an unknown token, or an unknown type needing a prefix raises. The Word-only `page` and `rel` variants render as the full number. `refs='ids'` is the other mode, for live-preview contexts where targets may sit outside the fragment: each reference bakes as a working link showing its target id (`<a href="#sec-pay" class="xref">sec-pay</a>`, author text kept as a prefix, variants ignored), with no registry, numbering, or failure modes. `id_prefix='md-'` namespaces the output against the ids of a host page: every element id is prefixed (the original kept in `data-id`, e.g. for CSS `attr()` markers), along with ref hrefs and any link to an in-fragment id; links to outside ids are untouched.
+- Cross-references become real links with baked text: `[@sec-pay]` renders as `<a href="#sec-pay">Section 1.</a>`, groups join as "Sections 1. and 1.(a)", and figure and table targets get "Figure 1"-style text. `reftypes=dict(exh=('Exhibit', 'Exhibits'))` adds prefix words beyond the built-in `sec`, `fig`, and `tbl`. A missing target, an unknown token, or an unknown type needing a prefix raises. The Word-only `page` and `rel` variants render as the full number. `refs='ids'` is the other mode, for live-preview contexts where targets may sit outside the fragment: each reference bakes as a working link showing its target id (`<a href="#sec-pay" class="xref">sec-pay</a>`, author text kept as a prefix, variants ignored), with no registry, numbering, or failure modes; captions render as authored, since without a registry the numbers would restart per fragment. `id_prefix='md-'` namespaces the output against the ids of a host page: every element id is prefixed (the original kept in `data-id`, e.g. for CSS `attr()` markers), along with ref hrefs and any link to an in-fragment id; links to outside ids are untouched. `fn_salt` adds a further prefix to footnote ids only (`fn-*`/`fnref-*`), keeping footnote pairs distinct across fragments that share one `id_prefix`.
 - Headings are numbered when `number_headings` is given ('legal', 'decimal', or a `{lvlText: numFmt}` dict as in mdhtml2docx), or automatically with 'decimal' when some reference needs a heading number. Numbers bake in as `<span class="heading-number">`, and full-context reference text ("3.(c)(iii)") is computed Word-style from the scheme.
-- Figures and tables number independently and always: a caption or an id earns a `<span class="caption-label">Figure 1</span>: ` in the `figcaption` or `caption`.
+- Figures and tables number independently whenever refs resolve: a caption or an id earns a `<span class="caption-label">Figure 1</span>: ` in the `figcaption` or `caption`.
 - `{=html}` raw data is decoded and spliced in place; raw data for other formats is removed. Malformed payloads are dropped with a warning.
 - A `colwidths` attribute lowers to a `<colgroup>`; `fr` values share the width remaining after fixed lengths.
 - Code blocks with a language are highlighted when fastpylight is installed: `hl='spans'` (default) emits `hl-*` classed spans, `hl='api'` wraps the block in the `<hl-code>` element for the CSS Custom Highlight API, and `hl=None` leaves code untouched. Two per-block hooks customize this: `hl_lang(text, lang)` may return a corrected language before highlighting (e.g. mapping a `%%sql` first line to `sql`), and `code_wrap(html, lang, text)` may return replacement markup for the finished block (a copy-button wrapper, a mermaid `pre`).
@@ -272,9 +272,11 @@ from mdhtml import to_md
 portable = to_md(markdown, number_headings='legal')
 ```
 
-Cross-references become plain text ("See Section 1.(a)"), with the same `reftypes`, `number_headings`, and auto-numbering rules as `to_html`; heading numbers bake into the heading text and attribute lists are stripped from it. A glued `: caption` line becomes a "Table 1: caption" paragraph, and with `implicit_figures=True` an image-only paragraph gains a "Figure 1: alt" paragraph. Span, link, image, code, and math attribute lists are stripped (`[x]{.note}` becomes `x`); IAL, ALD, and abbreviation definition lines are deleted; fenced-div `:::` lines are removed with their content kept. Raw `{=md}` blocks and inlines are spliced verbatim, other formats are removed, and grid tables (which have no GFM equivalent) drop to their rendered HTML table. References are plain text rather than links deliberately: text works on every renderer, while anchor links depend on per-platform id handling and slug rules.
+Cross-references become plain text ("See Section 1.(a)"), with the same `reftypes`, `number_headings`, and auto-numbering rules as `to_html`; heading numbers bake into the heading text and attribute lists are stripped from it. A glued `: caption` line becomes a "Table 1: caption" paragraph, and with `implicit_figures=True` an image-only paragraph gains a "Figure 1: alt" paragraph. Span, link, image, code, and math attribute lists are stripped (`[x]{.note}` becomes `x`); IAL, ALD, and abbreviation definition lines are deleted; fenced-div `:::` lines are removed with their content kept. Raw `{=md}` blocks and inlines are spliced verbatim, other formats are removed, and grid tables (which have no GFM equivalent) drop to their rendered HTML table. References are plain text rather than links deliberately: text works on every renderer, while anchor links depend on per-platform id handling and slug rules. With `templates=`, each template token is rewritten to whatever the `tmpl(body, syntax, form)` callable returns (`mustache_code` wraps tokens in code spans so they render literally everywhere); without `tmpl`, tokens pass through byte-identical.
 
 Inline constructs are recognized at any nesting depth with the parser's own grammar, so code spans, links, and escapes are honored, and `use {braces} freely` stays literal. Block constructs are rewritten wherever their lines carry no container marker, which includes `markdown="1"` containers and fenced divs; a heading or table caption inside a blockquote or list passes through unchanged, with a warning when it needed numbering or stripping.
+
+`fill_md(src, values)` is the companion filler: it resolves template tokens from a plain dict and touches nothing else, so the result is still-symbolic Markdown ready for any exporter. Variables take `str(values[name])`; `{{#name}}`/`{{^name}}` sections keep or drop their span by the value's truthiness (kept sections just lose their markers; no iteration). By default a field missing in either direction raises; with `strict=False` the mismatches land in `.warnings` and unfilled variables stay in place, so a document can be filled in stages (see `examples/filldemo.py`).
 
 Command-line usage (the `mdhtml` script is installed with the package):
 
@@ -282,6 +284,27 @@ Command-line usage (the `mdhtml` script is installed with the package):
 mdhtml input.md > out.html
 cat input.md | mdhtml --math=dollars
 ```
+
+### Typst and PDF export
+
+`to_typst` lowers MDHTML to [Typst](https://typst.app/) markup, and `to_pdf` compiles that straight to a PDF via the `typst` CLI (which must be on PATH):
+
+```python
+from mdhtml import to_pdf, to_typst
+
+typ = to_typst(to_mdhtml(markdown), number_headings='legal')
+to_pdf(to_mdhtml(markdown), 'out.pdf', reftypes=dict(exh=('Exhibit', 'Exhibits')))
+```
+
+Where the other exporters bake references as text or links, Typst refs stay *live*: `[@sec-pay]` becomes `#ref(<sec-pay>, supplement: [Section])`, resolved by Typst at compile time, so numbers stay correct under any later edit to the `.typ`. `reftypes` map to supplements, `number_headings` emits a `set heading` rule computing Word-style full-context numbers from the same `SCHEMES` (`None` numbers automatically when a reference needs it), figures and tables number natively, and `{ref=page}` becomes a live `page 6`-style reference (which also turns on page numbering). `{ref=text}` bakes the target's text as a link; the Word-only `leaf` and `rel` variants render as the full number. A missing target raises, as in mdhtml2docx.
+
+Footnotes become inline `#footnote[...]` (repeated references reuse the first via its label), code blocks use Typst's native raw highlighting, `colwidths` maps directly onto Typst track lists (`fr` is Typst's own unit), and LaTeX math renders through the [mitex](https://typst.app/universe/package/mitex) package, imported automatically when math is present (first compile downloads it, so offline builds should vendor it). `{=typst}` raw payloads splice verbatim; template tokens render through the same `tmpl(body, syntax, form)` callable contract as mdhtml2docx, returning Typst markup (`None` drops them). `prelude=` prepends set/show rules, playing the role a reference docx plays for Word, and `table_styles=` maps a table's `custom-style` name or class to extra Typst table arguments (`{'borderless table': 'stroke: none'}` for a signature block), mirroring how those same attributes select reference styles in mdhtml2docx. Typst cannot embed remote images, so a non-local `src` degrades to the alt text with a warning. Interactive PDF form fields are the one register with no Typst analog.
+
+
+## Examples
+
+The [examples/](examples/) folder holds a worked demonstration of the whole pipeline: a legal-flavored document (a solveit dialog) full of cross-references and template tokens, a small script that renders it to every output register - source and portable Markdown, HTML with fillable inputs, and docx in mail-merge, interactive-form, and data-bound-form flavors - and the outputs themselves. See [examples/README.md](examples/README.md) for the tour.
+
 
 ## Parsing strategy
 

@@ -3,10 +3,11 @@ from dataclasses import dataclass
 
 from ._html import parse_mdhtml
 from ._native import blocks as _blocks, edit_nodes as _edit_nodes, to_mdhtml as _to_mdhtml
-from .export import _normalize_offsets, math_js, to_html
-from .md import to_md
+from .export import math_js, mustache_kind, to_html
+from .md import _normalize_offsets, fill_md, mustache_code, to_md
+from .typst import to_pdf, to_typst
 
-__all__ = ["TemplateDelimiter", "parse_mdhtml", "to_dom", "to_mdhtml", "render", "blocks", "rewrite", "sample_md", "to_html", "to_md", "math_js"]
+__all__ = ["TemplateDelimiter", "MUSTACHE", "JINJA", "mustache_kind", "mustache_code", "parse_mdhtml", "to_dom", "to_mdhtml", "render", "blocks", "rewrite", "sample_md", "to_html", "to_md", "math_js", "to_typst", "to_pdf", "fill_md"]
 
 
 @dataclass(frozen=True)
@@ -27,6 +28,10 @@ class TemplateDelimiter:
             if not isinstance(self.balance, tuple) or len(self.balance) != 2 or any(not isinstance(x, str) or len(x) != 1 for x in self.balance):
                 raise ValueError("template balance must be a pair of single characters")
             if self.balance[0] == self.balance[1]: raise ValueError("template balance characters must differ")
+
+
+MUSTACHE = (TemplateDelimiter("mustache", "{{", "}}"),)
+JINJA = (TemplateDelimiter("jinja", "{{", "}}"), TemplateDelimiter("jinja-stmt", "{%", "%}"))
 
 
 def _template_args(templates):

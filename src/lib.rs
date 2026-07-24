@@ -11,6 +11,7 @@ mod block;
 mod entity;
 mod inline;
 mod line;
+#[cfg(feature = "python")]
 mod python;
 mod render;
 mod smart;
@@ -22,6 +23,7 @@ pub use ast::{
     TableCellContent, TableCellData, TableRow, TableRowData,
 };
 pub use block::BlockSpan;
+pub use inline::{EditNode, XrefSeg};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MathMode {
@@ -92,4 +94,15 @@ pub fn parse(src: &str, options: &Options) -> Document {
 }
 pub fn block_spans(src: &str, options: &Options) -> Vec<BlockSpan> {
     block::parse_block_spans(src, options)
+}
+
+/// Serialize a parsed [`Document`] to its MDHTML fragment.
+pub fn render(doc: &Document) -> String {
+    render::render_document(doc)
+}
+
+/// Inline edit nodes (images, math, xrefs, attrs, raw inlines, template tokens)
+/// with source ranges, for source-rewriting tools.
+pub fn edit_nodes(src: &str, options: &Options) -> Vec<EditNode> {
+    block::parse_edit_nodes(src, options)
 }

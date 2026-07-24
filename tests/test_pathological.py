@@ -12,10 +12,13 @@ def _timed(inp, **kwargs):
     return html, time.time() - t
 
 def _near_linear(mk, n, m=8, **kwargs):
-    "Render `mk(n // m)` and `mk(n)`; fail on obviously super-linear growth (quadratic would be ~`m**2`)."
-    _, small = _timed(mk(n // m), **kwargs)
+    "Render `mk(n // m)` `m` times and `mk(n)` once: near-linear growth keeps the totals similar, whatever the machine speed."
+    small = mk(n // m)
+    t = time.time()
+    for _ in range(m): to_mdhtml(small, **kwargs)
+    small_total = time.time() - t
     html, large = _timed(mk(n), **kwargs)
-    assert large < max(small, 0.01) * m * 1.5, (small, large)
+    assert large < small_total * 2 + 0.02, (small_total, large)
     return html
 
 def test_nested_brackets_do_not_explode():
@@ -29,7 +32,7 @@ def test_deep_blockquotes_are_bounded():
 def test_repeated_image_openers_are_linear_smoke(): _near_linear(lambda n: "![[]()" * n, 800)
 
 def test_raw_html_balancing_is_linear_smoke():
-    html = _near_linear(lambda n: "<div>\n" * n + "</div>\n" * n, 2_000)
+    html = _near_linear(lambda n: "<div>\n" * n + "</div>\n" * n, 4_000)
     assert html.startswith("<div>")
 
 def test_html5_repair_of_stray_closes_is_near_linear():

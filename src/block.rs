@@ -1,6 +1,6 @@
 use crate::ast::{
-    Align, Attr, Block, Definition, DefinitionItem, Document, Footnote, Inline, LinkRef, ListItem,
-    TableCellContent, TableCellData, TableRow, TableRowData,
+    Align, Attr, Block, Definition, DefinitionItem, Document, Footnote, HtmlToken, Inline, LinkRef,
+    ListItem, TableCellContent, TableCellData, TableRow, TableRowData,
 };
 use crate::attrs::{
     AttrLine, normalize_label, parse_attr_line, parse_braced_attr, parse_fence_info,
@@ -10,7 +10,7 @@ use crate::entity::decode_entities;
 use crate::inline::{EditNode, InlineContext, find_edit_nodes, parse_inlines};
 use crate::line::Line;
 use crate::tagfilter::{is_tagfiltered_start, tagfilter_html};
-use crate::template::line_token;
+use crate::template::{html_tokens, line_token};
 use crate::{MathMode, Options};
 use std::collections::{HashMap, HashSet};
 use unicode_width::UnicodeWidthChar;
@@ -85,8 +85,10 @@ fn parse_source(
                     span.url = Some(url.clone());
                     span.title = title.clone();
                 }
-            } else if matches!(block, Block::TemplateToken { .. }) {
+            } else if let Block::TemplateToken { syntax, body, .. } = block {
                 span.kind = "template_token";
+                span.syntax = Some(syntax.clone());
+                span.body = Some(body.clone());
             }
         }
     }
@@ -102,8 +104,16 @@ struct Parser {
     abbr_defs: HashMap<String, String>,
     attr_defs: HashMap<String, Attr>,
     footnotes: Vec<DraftFootnote>,
-    edit_regions: Vec<(usize, usize)>,
+    edit_regions: Vec<(usize, usize, RegionKind)>,
     collect_edits: bool,
+}
+
+/// What an edit region's text is: Markdown prose scanned by the inline edit
+/// scanner, or a raw HTML block scanned only for template tokens.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum RegionKind {
+    Prose,
+    Html,
 }
 
 struct ParsedBlocks {
@@ -195,6 +205,7 @@ enum DraftBlock {
     },
     Html {
         raw: String,
+        tokens: Vec<HtmlToken>,
     },
     HtmlContainer {
         tag: String,
@@ -373,7 +384,7 @@ fn finalize_block(block: DraftBlock, ctx: &InlineContext<'_>) -> Block {
             source,
             body,
         },
-        DraftBlock::Html { raw } => Block::Html { raw },
+        DraftBlock::Html { raw, tokens } => Block::Html { raw, tokens },
         DraftBlock::HtmlContainer {
             tag,
             attrs,
@@ -727,7 +738,7 @@ impl Parser {
 /// `start`/`end` are half-open 0-based line indices into the source. Code and
 /// math blocks also carry their inner `text` (and `info`/`lang` for fences);
 /// headings carry `level`, `id`, and attr-stripped `text`, tables `id` and
-/// `caption`, and implicit figures `id`, `text` (the alt), `url`, and `title`.
+/// `caption`, and implicit figures `id`, `text` (the alt), `url`, and `title`; template tokens `syntax` and `body`.
 #[derive(Clone, Debug)]
 pub struct BlockSpan {
     pub kind: &'static str,
@@ -741,6 +752,8 @@ pub struct BlockSpan {
     pub caption: Option<String>,
     pub url: Option<String>,
     pub title: Option<String>,
+    pub syntax: Option<String>,
+    pub body: Option<String>,
 }
 
 impl BlockSpan {
@@ -757,6 +770,8 @@ impl BlockSpan {
             caption: None,
             url: None,
             title: None,
+            syntax: None,
+            body: None,
         }
     }
 }
@@ -865,7 +880,7 @@ pub fn parse_edit_nodes(src: &str, options: &Options) -> Vec<EditNode> {
 fn edit_nodes_for_regions(
     src: &str,
     lines: &[String],
-    regions: &[(usize, usize)],
+    regions: &[(usize, usize, RegionKind)],
     ctx: &InlineContext<'_>,
 ) -> Vec<EditNode> {
     let mut starts = Vec::with_capacity(lines.len());
@@ -875,12 +890,22 @@ fn edit_nodes_for_regions(
         offset += line.len() + 1;
     }
     let mut out = Vec::new();
-    for &(start, end) in regions {
+    for &(start, end, kind) in regions {
         if start >= end {
             continue;
         }
         let byte_start = starts[start];
         let byte_end = starts[end - 1] + lines[end - 1].len();
+        if kind == RegionKind::Html {
+            for (s, e, t) in html_tokens(&src[byte_start..byte_end], &ctx.options.templates) {
+                out.push(EditNode::Template {
+                    range: byte_start + s..byte_start + e,
+                    syntax: t.syntax,
+                    body: t.body,
+                });
+            }
+            continue;
+        }
         for mut node in find_edit_nodes(&src[byte_start..byte_end], ctx) {
             node.shift(byte_start);
             out.push(node);
@@ -891,7 +916,8 @@ fn edit_nodes_for_regions(
         | EditNode::Math { range, .. }
         | EditNode::Xref { range, .. }
         | EditNode::Attrs { range, .. }
-        | EditNode::RawInline { range, .. } => range.start,
+        | EditNode::RawInline { range, .. }
+        | EditNode::Template { range, .. } => range.start,
     });
     out
 }
@@ -2372,13 +2398,18 @@ impl<'a> ContainerBuilder<'a> {
         self.finish_children(0, parser, depth)
     }
 
-    fn edit_regions(&self, end: usize) -> Vec<(usize, usize)> {
+    fn edit_regions(&self, end: usize) -> Vec<(usize, usize, RegionKind)> {
         let mut out = Vec::new();
         self.collect_edit_regions(0, end, &mut out);
         out
     }
 
-    fn collect_edit_regions(&self, idx: usize, end: usize, out: &mut Vec<(usize, usize)>) {
+    fn collect_edit_regions(
+        &self,
+        idx: usize,
+        end: usize,
+        out: &mut Vec<(usize, usize, RegionKind)>,
+    ) {
         let children = &self.nodes[idx].children;
         for (n, &child) in children.iter().enumerate() {
             let child_end = children
@@ -2389,11 +2420,13 @@ impl<'a> ContainerBuilder<'a> {
                 BuildKind::Paragraph { .. }
                 | BuildKind::Heading { .. }
                 | BuildKind::Table { .. } => {
-                    out.push((self.nodes[child].start_line, child_end));
+                    out.push((self.nodes[child].start_line, child_end, RegionKind::Prose));
+                }
+                BuildKind::HtmlBlock { .. } => {
+                    out.push((self.nodes[child].start_line, child_end, RegionKind::Html));
                 }
                 BuildKind::FencedCode { .. }
                 | BuildKind::IndentedCode { .. }
-                | BuildKind::HtmlBlock { .. }
                 | BuildKind::Math { .. }
                 | BuildKind::GridTable { .. }
                 | BuildKind::ThematicBreak { .. } => {}
@@ -2402,10 +2435,15 @@ impl<'a> ContainerBuilder<'a> {
         }
     }
 
-
     /// Recursive walk emitting `(node, start, end)` for headings and tables
     /// nested inside containers (depth > 0), for `Options::nested_spans`.
-    fn nested_nodes(&self, idx: usize, end: usize, depth: usize, out: &mut Vec<(usize, usize, usize)>) {
+    fn nested_nodes(
+        &self,
+        idx: usize,
+        end: usize,
+        depth: usize,
+        out: &mut Vec<(usize, usize, usize)>,
+    ) {
         let children = &self.nodes[idx].children;
         for (n, &child) in children.iter().enumerate() {
             let child_end = children
@@ -2539,13 +2577,23 @@ impl<'a> ContainerBuilder<'a> {
                 lang: None,
                 text: text.clone(),
             }],
-            BuildKind::HtmlBlock { raw, .. } => vec![DraftBlock::Html {
-                raw: if parser.options.tagfilter {
+            BuildKind::HtmlBlock { raw, .. } => {
+                let raw = if parser.options.tagfilter {
                     tagfilter_html(raw)
                 } else {
                     raw.clone()
-                },
-            }],
+                };
+                let tokens = html_tokens(&raw, &parser.options.templates)
+                    .into_iter()
+                    .map(|(start, end, t)| HtmlToken {
+                        start,
+                        end,
+                        syntax: t.syntax,
+                        body: t.body,
+                    })
+                    .collect();
+                vec![DraftBlock::Html { raw, tokens }]
+            }
             BuildKind::GridTable { lines, caption, .. } => parse_grid_table(lines, parser, depth)
                 .map(|mut table| {
                     if let DraftBlock::Table { caption: c, .. } = &mut table {
@@ -3825,6 +3873,9 @@ fn is_grid_border_line(line: &str) -> bool {
     segments > 0
 }
 
+// `col` is a grid coordinate feeding DSU arithmetic, not an access index;
+// the indexed form matches the sibling loops over the same grid.
+#[allow(clippy::needless_range_loop)]
 fn parse_grid_table(lines: &[String], parser: &mut Parser, depth: usize) -> Option<DraftBlock> {
     if lines.len() < 3 {
         return None;
